@@ -1,0 +1,65 @@
+# Maintainer: MX4Control Team
+# CachyOS/Arch Linux package for MX4Control
+
+pkgname=mx4control
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="GTK4/Libadwaita configuration app for Logitech MX Master 4 mouse"
+arch=('x86_64')
+url="https://github.com/mx4control/mx4control"
+license=('MIT')
+depends=(
+    'python>=3.12'
+    'gtk4'
+    'libadwaita'
+    'python-gobject'
+    'python-cairo'
+    'python-hidapi'
+    'python-evdev'
+    'python-dbus'
+)
+makedepends=(
+    'python-build'
+    'python-installer'
+    'python-wheel'
+    'python-setuptools'
+)
+optdepends=(
+    'solaar: Alternative Logitech device manager'
+)
+provides=('mx4control')
+conflicts=('mx4control-git')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+# For local builds:
+# source=("$pkgname-$pkgver::file:///path/to/mx4control")
+
+build() {
+    cd "$srcdir/$pkgname-$pkgver"
+    python -m build --wheel --no-isolation
+}
+
+package() {
+    cd "$srcdir/$pkgname-$pkgver"
+
+    # Install Python package
+    python -m installer --destdir="$pkgdir" dist/*.whl
+
+    # Install desktop entry
+    install -Dm644 packaging/mx4control.desktop \
+        "$pkgdir/usr/share/applications/mx4control.desktop"
+
+    # Install icon (placeholder - would need actual icon)
+    # install -Dm644 data/icons/mx4control.svg \
+    #     "$pkgdir/usr/share/icons/hicolor/scalable/apps/mx4control.svg"
+
+    # Install udev rules for device access
+    install -Dm644 packaging/99-mx4control.rules \
+        "$pkgdir/usr/lib/udev/rules.d/99-mx4control.rules"
+
+    # Install license
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
+
+# vim:set ts=4 sw=4 et:

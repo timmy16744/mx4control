@@ -1,0 +1,15 @@
+# MX4Control udev rules for Logitech devices
+# Install to /etc/udev/rules.d/42-mx4control.rules
+
+# Logitech USB Receiver (Unifying, Bolt, etc.)
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="046d", MODE="0660", GROUP="input"
+
+# Logitech devices via USB
+SUBSYSTEM=="usb", ATTRS{idVendor}=="046d", MODE="0660", GROUP="input"
+
+# Allow access to input devices for the input group
+KERNEL=="event*", SUBSYSTEM=="input", MODE="0660", GROUP="input"
+
+# Specifically for evdev access
+KERNEL=="event*", ATTRS{name}=="*[Ll]ogitech*", MODE="0660", GROUP="input"
+KERNEL=="event*", ATTRS{name}=="*MX Master*", MODE="0660", GROUP="input"
