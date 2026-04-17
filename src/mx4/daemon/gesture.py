@@ -75,6 +75,23 @@ SEGMENT_COUNT = 8
 CANCEL_RADIUS = 40  # pixels of movement before selecting a segment
 
 
+# Mapping from Linux evdev button codes to Logitech HID++ control IDs.
+# Populated lazily to avoid importing evdev at module load time when the
+# settings GUI imports this module just for constants.
+_EVDEV_TO_CID: dict[int, int] = {}
+if evdev is not None and ecodes is not None:
+    _EVDEV_TO_CID = {
+        ecodes.BTN_LEFT: ControlID.LEFT_CLICK,
+        ecodes.BTN_RIGHT: ControlID.RIGHT_CLICK,
+        ecodes.BTN_MIDDLE: ControlID.MIDDLE_CLICK,
+        ecodes.BTN_SIDE: ControlID.BACK,         # 275
+        ecodes.BTN_EXTRA: ControlID.FORWARD,     # 276
+        ecodes.BTN_BACK: ControlID.BACK,
+        ecodes.BTN_FORWARD: ControlID.FORWARD,
+        ecodes.BTN_TASK: ControlID.SMART_SHIFT,  # 278 — sometimes remaps here
+    }
+
+
 class GestureEngine:
     """Subscribes to HID++ notifications + evdev movement."""
 
@@ -109,6 +126,12 @@ class GestureEngine:
         # Which CID triggered: gesture button, or back-fallback
         self._trigger_cid: Optional[int] = None
         self._diverted_cids: set[int] = set()
+
+        # Live button-press tracking for the settings GUI. evdev gives us
+        # BTN_LEFT/RIGHT/MIDDLE/SIDE/EXTRA even while HID++ diverts the
+        # gesture button, so we can light up the mouse preview in real
+        # time without touching anything else's normal function.
+        self._pressed_cids: set[int] = set()
 
     # ─── lifecycle ──────────────────────────────────────────────────────
 
@@ -227,28 +250,50 @@ class GestureEngine:
             for event in self._evdev.read_loop():
                 if not self._running:
                     break
-                if event.type != ecodes.EV_REL:
-                    continue
-                with self._lock:
-                    if not self._active:
-                        continue
-                    if event.code == ecodes.REL_X:
-                        self._dx += event.value
-                    elif event.code == ecodes.REL_Y:
-                        self._dy += event.value
-                    dx, dy = self._dx, self._dy
 
-                # Compute current segment (outside lock so handler is free)
-                new_seg = _segment_for(dx, dy)
-                if new_seg != self._selected_segment:
-                    self._selected_segment = new_seg
-                try:
-                    self._on_move(dx, dy, new_seg)
-                except Exception as e:
-                    logger.error(f"on_move handler raised: {e}")
+                if event.type == ecodes.EV_KEY:
+                    # Passive button-press tracking for the live mouse
+                    # widget in the settings GUI. These events still come
+                    # through because we only HID++-divert the gesture
+                    # button, not the others.
+                    cid = _EVDEV_TO_CID.get(event.code)
+                    if cid is not None:
+                        with self._lock:
+                            if event.value:
+                                self._pressed_cids.add(cid)
+                            else:
+                                self._pressed_cids.discard(cid)
+
+                elif event.type == ecodes.EV_REL:
+                    with self._lock:
+                        if not self._active:
+                            continue
+                        if event.code == ecodes.REL_X:
+                            self._dx += event.value
+                        elif event.code == ecodes.REL_Y:
+                            self._dy += event.value
+                        dx, dy = self._dx, self._dy
+
+                    new_seg = _segment_for(dx, dy)
+                    if new_seg != self._selected_segment:
+                        self._selected_segment = new_seg
+                    try:
+                        self._on_move(dx, dy, new_seg)
+                    except Exception as e:
+                        logger.error(f"on_move handler raised: {e}")
         except OSError as e:
             if self._running:
                 logger.error(f"evdev loop error: {e}")
+
+    def pressed_cids(self) -> set[int]:
+        """Snapshot of currently-pressed button CIDs (thread-safe)."""
+        with self._lock:
+            pressed = set(self._pressed_cids)
+            # Include the gesture trigger so its press shows while the
+            # ring is up, even though HID++ diverted it off evdev
+            if self._active and self._trigger_cid is not None:
+                pressed.add(self._trigger_cid)
+            return pressed
 
     # ─── gesture state transitions ──────────────────────────────────────
 

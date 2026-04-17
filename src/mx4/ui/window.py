@@ -9,6 +9,8 @@ from gi.repository import Gtk, Adw
 
 from .pages.overview import OverviewPage
 from .pages.ring import RingPage
+from .pages.haptics import HapticsPage
+from .pages.scroll import ScrollPage
 
 
 class SettingsWindow(Adw.ApplicationWindow):
@@ -40,8 +42,12 @@ class SettingsWindow(Adw.ApplicationWindow):
 
         # Pages
         overview = OverviewPage(client)
+        scroll = ScrollPage(client)
+        haptics = HapticsPage(client)
         ring = RingPage(client)
         view_stack.add_titled_with_icon(overview, "overview", "Device", "input-mouse-symbolic")
+        view_stack.add_titled_with_icon(scroll, "scroll", "Scroll", "view-continuous-symbolic")
+        view_stack.add_titled_with_icon(haptics, "haptics", "Haptics", "audio-speakers-symbolic")
         view_stack.add_titled_with_icon(ring, "ring", "Actions Ring", "view-app-grid-symbolic")
 
         # A bottom view-switcher for narrow widths

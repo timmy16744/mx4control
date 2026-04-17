@@ -16,6 +16,7 @@ import argparse
 import logging
 import signal
 import sys
+import threading
 import time
 from typing import Optional
 
@@ -232,9 +233,14 @@ class Daemon:
         self.ipc.register("set_smartshift", self._ipc_set_smartshift)
         self.ipc.register("set_hires", self._ipc_set_hires)
         self.ipc.register("trigger_haptic", self._ipc_trigger_haptic)
+        self.ipc.register("identify", self._ipc_identify)
         self.ipc.register("switch_host", self._ipc_switch_host)
         self.ipc.register("reload_config", self._ipc_reload)
         self.ipc.register("set_thumbwheel_diverted", self._ipc_set_thumbwheel)
+        # Live / interactive controls
+        self.ipc.register("get_pressed_buttons", self._ipc_pressed_buttons)
+        self.ipc.register("get_buttons", self._ipc_get_buttons)
+        self.ipc.register("remap_button", self._ipc_remap_button)
 
     def _ipc_get_state(self) -> dict:
         if self.device is None:
@@ -313,6 +319,59 @@ class Daemon:
     def _ipc_reload(self) -> bool:
         self.config_store._config = None
         self.config_store.load()
+        return True
+
+    # ─── live / interactive ─────────────────────────────────────────────
+
+    def _ipc_pressed_buttons(self) -> list[int]:
+        """Return currently-pressed Control IDs (polled by the settings
+        GUI to light up the live mouse widget)."""
+        if self.gesture is None:
+            return []
+        return sorted(self.gesture.pressed_cids())
+
+    def _ipc_get_buttons(self) -> list[dict]:
+        """Enumerate every physical button the firmware reports.
+
+        Used by the settings GUI to render the correct subset of
+        remap targets (divertable / remappable) next to each button.
+        """
+        if self.device is None:
+            return []
+        count = self.device.get_button_count()
+        out = []
+        for i in range(count):
+            info = self.device.get_button_info(i)
+            if info is None:
+                continue
+            out.append({
+                "index": info.index,
+                "cid": info.cid,
+                "task_id": info.task_id,
+                "flags": info.flags,
+                "remap_cid": info.remap_cid,
+                "diverted": info.diverted,
+                "remappable": info.remappable,
+                "divertable": info.divertable,
+            })
+        return out
+
+    def _ipc_remap_button(self, cid: int, target_cid: int) -> bool:
+        if self.device is None:
+            return False
+        return self.device.remap_button(int(cid), int(target_cid))
+
+    def _ipc_identify(self) -> bool:
+        """Fire three light-click haptics so the user can confirm which
+        mouse they're configuring when multiple are around."""
+        if self.device is None:
+            return False
+        import threading
+        def seq():
+            for _ in range(3):
+                self.device.trigger_haptic(1)
+                time.sleep(0.18)
+        threading.Thread(target=seq, daemon=True).start()
         return True
 
 
