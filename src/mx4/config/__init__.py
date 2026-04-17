@@ -3,11 +3,12 @@
 from .schema import (
     Config, HapticSettings, PointerSettings, ScrollSettings,
     ActionSlice, RingProfile, ThumbWheelSettings, DaemonSettings,
+    ButtonBinding,
 )
 from .store import ConfigStore
 
 __all__ = [
     "Config", "HapticSettings", "PointerSettings", "ScrollSettings",
     "ActionSlice", "RingProfile", "ThumbWheelSettings", "DaemonSettings",
-    "ConfigStore",
+    "ButtonBinding", "ConfigStore",
 ]

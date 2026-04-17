@@ -69,6 +69,26 @@ class RingProfile:
 
 
 @dataclass
+class ButtonBinding:
+    """One physical-button → action binding.
+
+    ``action_type`` is one of:
+
+    ``"default"``     Let the firmware do whatever it normally does.
+    ``"disabled"``    Divert the button so it emits nothing.
+    ``"remap"``       Firmware-level remap to another CID (``action_data`` is
+                      the target CID as a decimal string).
+    ``"keystroke"``   Divert the button and fire a keyboard shortcut
+                      (``action_data`` is e.g. ``"ctrl+shift+n"``).
+    ``"command"``     Divert and launch a shell command.
+    ``"application"`` Divert and launch a .desktop-style app name.
+    """
+    cid: int
+    action_type: str = "default"
+    action_data: str = ""
+
+
+@dataclass
 class DaemonSettings:
     # Low-latency poll interval for the HID++ reader (seconds).
     reader_timeout: float = 0.2
@@ -90,6 +110,8 @@ class Config:
     daemon: DaemonSettings = field(default_factory=DaemonSettings)
     # Global / default ring + per-app overrides keyed by app_id
     ring_profiles: dict[str, RingProfile] = field(default_factory=dict)
+    # Per-CID button bindings. Absent entries = default firmware behaviour.
+    button_bindings: list[ButtonBinding] = field(default_factory=list)
 
     def __post_init__(self):
         if "default" not in self.ring_profiles:

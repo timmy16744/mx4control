@@ -12,7 +12,7 @@ from typing import Any, Optional
 from .schema import (
     Config, HapticSettings, PointerSettings, ScrollSettings,
     ThumbWheelSettings, DaemonSettings, RingProfile, ActionSlice,
-    CONFIG_VERSION, _default_ring,
+    ButtonBinding, CONFIG_VERSION, _default_ring,
 )
 
 logger = logging.getLogger(__name__)
@@ -154,6 +154,8 @@ def _from_dict(cls, data: dict) -> Any:
             kwargs[f.name] = {
                 k: _from_dict(RingProfile, v) for k, v in val.items()
             }
+        elif f.name == "button_bindings":
+            kwargs[f.name] = [_from_dict(ButtonBinding, b) for b in val]
         elif f.name == "haptics":
             kwargs[f.name] = _from_dict(HapticSettings, val)
         elif f.name == "pointer":
@@ -201,6 +203,13 @@ def _write_toml(f, data: dict) -> None:
             for k, v in s.items():
                 f.write(f"{k} = {_toml_value(v)}\n")
             f.write("\n")
+
+    # Button bindings
+    for b in (data.get("button_bindings") or []):
+        f.write("[[button_bindings]]\n")
+        for k, v in b.items():
+            f.write(f"{k} = {_toml_value(v)}\n")
+        f.write("\n")
 
 
 def _toml_key(k: str) -> str:

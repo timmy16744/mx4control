@@ -26,10 +26,11 @@ gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, GLib
 
 from ..common.logging import configure as configure_logging
-from ..config import ConfigStore
+from ..config import ButtonBinding, ConfigStore
 from ..hidpp import (
-    HIDPPDispatcher, MXMaster4, HapticPattern, find_mx_master_4,
+    ControlID, HIDPPDispatcher, MXMaster4, HapticPattern, find_mx_master_4,
 )
+from .buttons import ButtonService
 from .executor import execute as execute_action
 from .gesture import GestureEngine, GestureEvent
 from .hyprland import HyprlandFocusWatcher
@@ -54,6 +55,7 @@ class Daemon:
         self.dispatcher: Optional[HIDPPDispatcher] = None
         self.gesture: Optional[GestureEngine] = None
         self.overlay: Optional[ActionsRingOverlay] = None
+        self.buttons: Optional[ButtonService] = None
 
         self.profiles = ProfileManager(config_store.config)
         self.focus_watcher: Optional[HyprlandFocusWatcher] = None
@@ -109,11 +111,25 @@ class Daemon:
         if cfg.daemon.autostart_gesture:
             self._start_gesture()
 
+        # Start the button service — applies user bindings to divertable
+        # buttons. Skip any CID the gesture engine is already handling.
+        gesture_cids: set[int] = set()
+        if self.gesture is not None and self.gesture._trigger_cid is not None:
+            gesture_cids.add(self.gesture._trigger_cid)
+        self.buttons = ButtonService(self.device, skip_cids=gesture_cids)
+        self.buttons.start(list(cfg.button_bindings))
+
         self._schedule_health_check()
         logger.info(f"Connected via {info['connection_type']} (slot={info['device_index']})")
         return False  # don't repeat this idle
 
     def _disconnect(self) -> None:
+        if self.buttons:
+            try:
+                self.buttons.stop()
+            except Exception:
+                pass
+            self.buttons = None
         if self.gesture:
             self.gesture.stop()
             self.gesture = None
@@ -241,6 +257,9 @@ class Daemon:
         self.ipc.register("get_pressed_buttons", self._ipc_pressed_buttons)
         self.ipc.register("get_buttons", self._ipc_get_buttons)
         self.ipc.register("remap_button", self._ipc_remap_button)
+        # Full button rebind system
+        self.ipc.register("get_bindings", self._ipc_get_bindings)
+        self.ipc.register("set_binding", self._ipc_set_binding)
 
     def _ipc_get_state(self) -> dict:
         if self.device is None:
@@ -372,6 +391,42 @@ class Daemon:
                 self.device.trigger_haptic(1)
                 time.sleep(0.18)
         threading.Thread(target=seq, daemon=True).start()
+        return True
+
+    def _ipc_get_bindings(self) -> list[dict]:
+        """Return the user's saved button bindings."""
+        cfg = self.config_store.config
+        return [
+            {"cid": b.cid, "action_type": b.action_type, "action_data": b.action_data}
+            for b in cfg.button_bindings
+        ]
+
+    def _ipc_set_binding(self, cid: int, action_type: str,
+                        action_data: str = "") -> bool:
+        """Create, update, or clear a binding.
+
+        ``action_type`` must be one of: default / disabled / remap /
+        keystroke / command / application. For ``remap``, ``action_data``
+        is the target CID as a decimal string.
+        """
+        valid = {"default", "disabled", "remap", "keystroke",
+                 "command", "application"}
+        if action_type not in valid:
+            return False
+
+        cfg = self.config_store.config
+        # Replace or append
+        cfg.button_bindings = [b for b in cfg.button_bindings if b.cid != cid]
+        if action_type != "default":
+            cfg.button_bindings.append(
+                ButtonBinding(cid=int(cid),
+                              action_type=action_type,
+                              action_data=str(action_data))
+            )
+        self.config_store.save()
+
+        if self.buttons is not None:
+            self.buttons.apply(list(cfg.button_bindings))
         return True
 
 

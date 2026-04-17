@@ -12,22 +12,11 @@ from gi.repository import Gtk, Adw, GLib
 
 from ..widgets.common import section_title, page_title, stat_card
 from ..widgets.mouse_svg import MouseSVG, BUTTON_LABELS
+from ..widgets.rebind_dialog import RebindDialog
 from ...hidpp import ControlID
 
 
 DPI_PRESETS = [400, 800, 1000, 1600, 2000, 4000, 8000]
-
-REMAP_TARGETS: list[tuple[str, Optional[int]]] = [
-    ("Default (original function)", None),
-    ("Left click",        ControlID.LEFT_CLICK),
-    ("Right click",       ControlID.RIGHT_CLICK),
-    ("Middle click",      ControlID.MIDDLE_CLICK),
-    ("Back",              ControlID.BACK),
-    ("Forward",           ControlID.FORWARD),
-    ("SmartShift toggle", ControlID.SMART_SHIFT),
-    ("Gesture button",    ControlID.GESTURE_BUTTON),
-]
-
 POLL_PRESSED_MS = 70
 
 
@@ -178,10 +167,10 @@ class OverviewPage(Gtk.Box):
             try:
                 state = self.client.state() or {}
                 buttons = (self.client.call("get_buttons") or {}).get("result") or []
+                bindings = (self.client.call("get_bindings") or {}).get("result") or []
             except Exception:
-                state = {"connected": False}
-                buttons = []
-            GLib.idle_add(self._apply_state, state, buttons)
+                state, buttons, bindings = {"connected": False}, [], []
+            GLib.idle_add(self._apply_state, state, buttons, bindings)
         threading.Thread(target=fetch, daemon=True).start()
 
     def _poll_pressed_tick(self) -> bool:
@@ -199,14 +188,19 @@ class OverviewPage(Gtk.Box):
         self.mouse_svg.set_pressed_cids(cids)
         return False
 
-    def _apply_state(self, state: dict, buttons: list[dict]) -> bool:
+    def _apply_state(self, state: dict, buttons: list[dict],
+                     bindings: list[dict] | None = None) -> bool:
         self._updating = True
         try:
             self._button_infos = {b["cid"]: b for b in buttons}
+            # "Customised" = firmware-remapped OR has a non-default binding
             remapped = {
                 b["cid"] for b in buttons
                 if b.get("remap_cid") and b["remap_cid"] not in (0, b["cid"])
             }
+            for b in bindings or []:
+                if b.get("action_type") not in (None, "default"):
+                    remapped.add(b["cid"])
             self.mouse_svg.set_remapped_cids(remapped)
 
             if not state.get("connected"):
@@ -381,85 +375,43 @@ class OverviewPage(Gtk.Box):
             target=lambda: self.client.switch_host(idx), daemon=True,
         ).start()
 
-    # ─── remap dialog ───────────────────────────────────────────────
+    # ─── rebind dialog ──────────────────────────────────────────────
 
     def _on_mouse_button_clicked(self, _w, cid: int):
         info = self._button_infos.get(cid)
         label = BUTTON_LABELS.get(cid, f"CID 0x{cid:04X}")
         remappable = bool(info and info.get("remappable"))
+        divertable = bool(info and info.get("divertable"))
 
-        dialog = Adw.AlertDialog(
-            heading=f"Remap {label.lower()} button",
-            body=(
-                "Pick a new action. “Default” restores the firmware's original behaviour."
-                if remappable else
-                "This button is firmware-locked and can't be remapped."
-            ),
+        # Pull the current binding (if any) from the daemon
+        current_type = "default"
+        current_data = ""
+        try:
+            resp = self.client.call("get_bindings") or {}
+            for b in resp.get("result") or []:
+                if b["cid"] == cid:
+                    current_type = b["action_type"]
+                    current_data = b["action_data"]
+                    break
+        except Exception:
+            pass
+
+        def on_apply(action_type: str, action_data: str):
+            threading.Thread(
+                target=lambda: self.client.call(
+                    "set_binding",
+                    cid=cid,
+                    action_type=action_type,
+                    action_data=action_data,
+                ),
+                daemon=True,
+            ).start()
+            GLib.timeout_add(300, lambda: (self._refresh_live() or False))
+
+        dialog = RebindDialog(
+            button_label=label, cid=cid,
+            current_action_type=current_type, current_action_data=current_data,
+            remappable=remappable, divertable=divertable,
+            on_apply=on_apply,
         )
-        dialog.add_response("cancel", "Cancel")
-
-        if remappable:
-            current_remap = info.get("remap_cid") if info else 0
-            current_is_default = current_remap in (0, cid)
-
-            list_box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-            list_box.add_css_class("boxed-list")
-
-            group_root: Optional[Gtk.CheckButton] = None
-            for text, target_cid in REMAP_TARGETS:
-                if target_cid == cid:
-                    continue
-                row = Adw.ActionRow(title=text)
-                check = Gtk.CheckButton()
-                if group_root is None:
-                    group_root = check
-                else:
-                    check.set_group(group_root)
-                active = (
-                    (target_cid is None and current_is_default)
-                    or (target_cid is not None and target_cid == current_remap)
-                )
-                check.set_active(active)
-                check.cid = target_cid  # type: ignore[attr-defined]
-                row.add_prefix(check)
-                row.set_activatable_widget(check)
-                list_box.append(row)
-
-            dialog.add_response("apply", "Apply")
-            dialog.set_response_appearance("apply", Adw.ResponseAppearance.SUGGESTED)
-            dialog.set_extra_child(list_box)
-
-            def on_response(_d, response):
-                if response != "apply":
-                    return
-                # Walk the list-box to find the active radio
-                row = list_box.get_first_child()
-                while row is not None:
-                    pending = [row]
-                    while pending:
-                        w = pending.pop()
-                        if isinstance(w, Gtk.CheckButton) and w.get_active():
-                            tid = getattr(w, "cid", None)
-                            self._apply_remap(cid, tid)
-                            return
-                        sibling = w.get_next_sibling()
-                        if sibling:
-                            pending.append(sibling)
-                        first = w.get_first_child()
-                        if first:
-                            pending.append(first)
-                    row = row.get_next_sibling()
-
-            dialog.connect("response", on_response)
-
         dialog.present(self.get_root())
-
-    def _apply_remap(self, cid: int, target_cid: Optional[int]) -> None:
-        target = target_cid if target_cid is not None else cid
-        threading.Thread(
-            target=lambda: self.client.call(
-                "remap_button", cid=cid, target_cid=target,
-            ),
-            daemon=True,
-        ).start()
-        GLib.timeout_add(300, lambda: (self._refresh_live() or False))
