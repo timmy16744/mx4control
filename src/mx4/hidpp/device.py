@@ -448,32 +448,39 @@ class MXMaster4:
             return None
 
     def _read_host_name(self, host_index: int, name_len: int) -> str:
+        """Read a host's name via HOSTS_INFO fn 0x02(host_idx, offset).
+
+        The response echoes ``[host_idx, offset, ...name bytes]`` — both
+        values come back before the name payload, so we skip **two**
+        leading bytes, not one. The v1 parser dropped only one byte and
+        surfaced the offset byte as part of the name which is what
+        produced the garbled ``%&`` / ``R&`` strings earlier.
+        """
         if name_len <= 0:
             return ""
         name = bytearray()
         offset = 0
-        # Chunk size depends on device: HOSTS_INFO v1 returns 15 bytes
-        # of name per chunk (after 1 byte offset echo in some revs).
-        # We pull up to ``max_name_len`` bytes total, stopping at the
-        # first NUL.
+        # Max name len per the HID++ 2.0 HOSTS_INFO v1 spec is 24.
         while len(name) < name_len and offset < 64:
             chunk = self._d.request(FeatureID.HOSTS_INFO, 0x02, host_index, offset)
-            if not chunk:
+            if not chunk or len(chunk) < 3:
                 break
-            # The probe showed the first byte of the chunk echoes the
-            # offset; the rest is name bytes.
-            data = chunk[1:]
+            data = chunk[2:]  # skip host_idx echo + offset echo
+            if not data:
+                break
             remaining = name_len - len(name)
             name.extend(data[:min(len(data), remaining)])
-            offset += len(data)
+            offset += min(len(data), remaining)
             if 0 in data:
                 break
-        # Strip at first NUL and decode
         raw = bytes(name)
         nul = raw.find(b"\x00")
         if nul >= 0:
             raw = raw[:nul]
-        return raw.decode("utf-8", errors="ignore").strip()
+        # Filter out non-printable bytes that sometimes leak in on older
+        # firmwares — keep ASCII + common UTF-8
+        decoded = raw.decode("utf-8", errors="ignore").strip()
+        return "".join(c for c in decoded if c.isprintable())
 
     def switch_host(self, host_index: int) -> bool:
         try:

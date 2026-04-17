@@ -1,0 +1,562 @@
+/* ═══════════════════════════════════════════════════════════════════
+   MX4Control — industrial precision meets haptic warmth.
+   Copper accent (#d4a574) for primary highlights, teal (#4ecdc4) for
+   secondary. Deep neutral base with subtle card elevation.
+   ═══════════════════════════════════════════════════════════════════ */
+
+@define-color mx_bg_primary        #1a1a1d;
+@define-color mx_bg_secondary      #232326;
+@define-color mx_bg_elevated       #2d2d32;
+@define-color mx_bg_card           #28282d;
+
+@define-color mx_accent            #d4a574;
+@define-color mx_accent_bright     #e0b584;
+@define-color mx_accent_deep       #c49a6c;
+@define-color mx_accent_glow       rgba(212, 165, 116, 0.30);
+@define-color mx_accent_glow_soft  rgba(212, 165, 116, 0.18);
+
+@define-color mx_teal              #4ecdc4;
+
+@define-color mx_text_primary      #f0ece8;
+@define-color mx_text_secondary    #8a8a8f;
+@define-color mx_text_muted        #5a5a5f;
+
+@define-color mx_success           #4ade80;
+@define-color mx_warning           #fbbf24;
+@define-color mx_error             #f87171;
+
+@define-color mx_border            rgba(255, 255, 255, 0.06);
+@define-color mx_border_hover      rgba(212, 165, 116, 0.40);
+
+/* ─────────────────────────────────────────────────────────────────────
+   Root window
+   ───────────────────────────────────────────────────────────────────── */
+
+window.mx4-window,
+window.mx4-window > * {
+    background-color: @mx_bg_primary;
+    color: @mx_text_primary;
+}
+
+window.mx4-window headerbar {
+    background: @mx_bg_primary;
+    border-bottom: 1px solid @mx_border;
+    box-shadow: none;
+    padding: 0 8px;
+    min-height: 36px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Sidebar
+   ───────────────────────────────────────────────────────────────────── */
+
+.mx4-sidebar {
+    background: @mx_bg_secondary;
+    border-right: 1px solid @mx_border;
+    padding: 16px 10px;
+    min-width: 230px;
+}
+
+.mx4-brand {
+    font-family: "JetBrains Mono", "IBM Plex Mono", monospace;
+    font-size: 17px;
+    font-weight: 700;
+    color: @mx_text_primary;
+    letter-spacing: -0.3px;
+    padding: 4px 8px 2px 8px;
+}
+
+.mx4-brand-subtitle {
+    font-size: 11px;
+    color: @mx_text_muted;
+    padding: 0 8px 16px 8px;
+    letter-spacing: 0.2px;
+}
+
+.mx4-sidebar-sep {
+    background: @mx_border;
+    min-height: 1px;
+    margin: 0 4px 12px 4px;
+}
+
+.mx4-nav {
+    background: transparent;
+    padding: 0;
+}
+
+.mx4-nav row {
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin: 2px 0;
+    background: transparent;
+    transition: all 140ms ease;
+}
+
+.mx4-nav row:hover {
+    background: @mx_bg_elevated;
+}
+
+.mx4-nav row:selected {
+    background: linear-gradient(135deg,
+        rgba(212, 165, 116, 0.14) 0%,
+        rgba(212, 165, 116, 0.06) 100%);
+    border: 1px solid @mx_border_hover;
+    padding: 9px 11px;  /* compensate for border so size stays stable */
+}
+
+.mx4-nav row:selected .mx4-nav-title {
+    color: @mx_accent;
+}
+
+.mx4-nav row:selected .mx4-nav-icon {
+    color: @mx_accent;
+}
+
+.mx4-nav-icon {
+    color: @mx_text_secondary;
+}
+
+.mx4-nav-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: @mx_text_primary;
+}
+
+.mx4-nav-sub {
+    font-size: 10.5px;
+    color: @mx_text_muted;
+}
+
+/* Status footer in the sidebar */
+.mx4-status-footer {
+    background: @mx_bg_elevated;
+    border: 1px solid @mx_border;
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin: 8px 4px 0 4px;
+}
+
+.mx4-status-dot {
+    min-width: 10px;
+    min-height: 10px;
+    border-radius: 50%;
+}
+
+.mx4-status-dot.connected   { background: @mx_success; box-shadow: 0 0 6px @mx_success; }
+.mx4-status-dot.disconnected{ background: @mx_error; }
+.mx4-status-dot.searching   { background: @mx_warning; }
+
+.mx4-status-title { font-size: 12px; font-weight: 600; color: @mx_text_primary; }
+.mx4-status-sub   { font-size: 10px; color: @mx_text_muted; }
+
+/* ─────────────────────────────────────────────────────────────────────
+   Content area
+   ───────────────────────────────────────────────────────────────────── */
+
+.mx4-content {
+    background: @mx_bg_primary;
+    padding: 22px 28px;
+}
+
+.mx4-page-title {
+    font-family: "JetBrains Mono", "IBM Plex Mono", monospace;
+    font-size: 24px;
+    font-weight: 700;
+    color: @mx_text_primary;
+    letter-spacing: -0.4px;
+    padding-bottom: 4px;
+}
+
+.mx4-page-subtitle {
+    font-size: 12.5px;
+    color: @mx_text_secondary;
+    padding-bottom: 18px;
+}
+
+.mx4-section-title {
+    font-family: "Overpass", "Inter", "Outfit", sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    color: @mx_accent;
+    text-transform: uppercase;
+    letter-spacing: 1.4px;
+    margin: 12px 0 10px 0;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Cards
+   ───────────────────────────────────────────────────────────────────── */
+
+.mx4-card {
+    background: @mx_bg_card;
+    border: 1px solid @mx_border;
+    border-radius: 14px;
+    padding: 18px;
+}
+
+.mx4-card.compact { padding: 12px 16px; }
+
+.mx4-card-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: @mx_text_primary;
+}
+
+.mx4-card-sub {
+    font-size: 11.5px;
+    color: @mx_text_secondary;
+}
+
+.mx4-card-value {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 22px;
+    font-weight: 700;
+    color: @mx_accent;
+}
+
+.mx4-card-value-small {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 14px;
+    font-weight: 600;
+    color: @mx_text_primary;
+}
+
+.mx4-card-unit {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10.5px;
+    color: @mx_text_muted;
+    text-transform: lowercase;
+    letter-spacing: 0.4px;
+}
+
+/* Hero (device page big card) */
+.mx4-hero {
+    background: linear-gradient(180deg, @mx_bg_elevated 0%, @mx_bg_card 100%);
+    border: 1px solid @mx_border;
+    border-radius: 18px;
+    padding: 20px 24px;
+}
+
+.mx4-hero-name {
+    font-family: "Overpass", "Inter", sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    color: @mx_text_primary;
+    letter-spacing: -0.2px;
+}
+
+.mx4-hero-sub {
+    font-size: 12px;
+    color: @mx_text_secondary;
+}
+
+/* Battery glyphs tinted by state */
+.mx4-batt-low  .mx4-card-value { color: @mx_warning; }
+.mx4-batt-crit .mx4-card-value { color: @mx_error; }
+.mx4-batt-ok   .mx4-card-value { color: @mx_success; }
+
+/* ─────────────────────────────────────────────────────────────────────
+   Row-style cards (horizontal layouts)
+   ───────────────────────────────────────────────────────────────────── */
+
+.mx4-row {
+    background: @mx_bg_card;
+    border: 1px solid @mx_border;
+    border-radius: 12px;
+    padding: 10px 14px;
+    transition: border-color 140ms ease;
+}
+
+.mx4-row:hover {
+    border-color: @mx_border_hover;
+}
+
+.mx4-row-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: @mx_text_primary;
+}
+
+.mx4-row-sub {
+    font-size: 11px;
+    color: @mx_text_secondary;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Buttons
+   ───────────────────────────────────────────────────────────────────── */
+
+.mx4-btn-primary {
+    background: linear-gradient(180deg, @mx_accent 0%, @mx_accent_deep 100%);
+    color: @mx_bg_primary;
+    border: none;
+    border-radius: 10px;
+    padding: 9px 18px;
+    font-weight: 600;
+    box-shadow: 0 4px 10px rgba(212, 165, 116, 0.22),
+                inset 0 1px 0 rgba(255, 255, 255, 0.18);
+    transition: all 120ms ease;
+}
+
+.mx4-btn-primary:hover {
+    background: linear-gradient(180deg, @mx_accent_bright 0%, @mx_accent 100%);
+    box-shadow: 0 6px 16px rgba(212, 165, 116, 0.32),
+                inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.mx4-btn-primary:active {
+    box-shadow: 0 2px 6px rgba(212, 165, 116, 0.18);
+}
+
+.mx4-btn-ghost {
+    background: transparent;
+    color: @mx_text_secondary;
+    border: 1px solid @mx_border;
+    border-radius: 10px;
+    padding: 8px 16px;
+    font-weight: 500;
+    transition: all 120ms ease;
+}
+
+.mx4-btn-ghost:hover {
+    color: @mx_accent;
+    border-color: @mx_accent;
+    background: @mx_accent_glow_soft;
+}
+
+.mx4-btn-ghost:active {
+    background: @mx_accent_glow;
+}
+
+.mx4-chip {
+    background: @mx_bg_elevated;
+    color: @mx_text_secondary;
+    border: 1px solid @mx_border;
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11.5px;
+    font-weight: 600;
+    transition: all 120ms ease;
+}
+
+.mx4-chip:hover {
+    color: @mx_accent;
+    border-color: @mx_accent;
+}
+
+.mx4-chip:checked,
+.mx4-chip.active {
+    background: linear-gradient(180deg, @mx_accent 0%, @mx_accent_deep 100%);
+    color: @mx_bg_primary;
+    border-color: @mx_accent;
+    box-shadow: 0 2px 8px @mx_accent_glow;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Sliders
+   ───────────────────────────────────────────────────────────────────── */
+
+scale.mx4-slider trough {
+    background: @mx_bg_secondary;
+    border-radius: 4px;
+    min-height: 6px;
+}
+
+scale.mx4-slider highlight {
+    background: linear-gradient(90deg, @mx_accent 0%, @mx_teal 100%);
+    border-radius: 4px;
+}
+
+scale.mx4-slider slider {
+    background: @mx_accent;
+    border: 2px solid @mx_bg_primary;
+    border-radius: 50%;
+    min-width: 20px;
+    min-height: 20px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4),
+                0 0 0 4px @mx_accent_glow_soft;
+    transition: box-shadow 120ms ease;
+}
+
+scale.mx4-slider slider:hover {
+    background: @mx_accent_bright;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5),
+                0 0 0 6px @mx_accent_glow;
+}
+
+scale.mx4-slider value {
+    color: @mx_text_secondary;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    padding: 0 4px;
+}
+
+scale.mx4-slider-large trough { min-height: 10px; border-radius: 5px; }
+scale.mx4-slider-large slider { min-width: 26px; min-height: 26px; }
+
+scale.mx4-slider mark label {
+    font-size: 10px;
+    color: @mx_text_muted;
+    font-family: "JetBrains Mono", monospace;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Switches
+   ───────────────────────────────────────────────────────────────────── */
+
+switch {
+    background: @mx_bg_secondary;
+    border: 1px solid @mx_border;
+    border-radius: 16px;
+    min-width: 46px;
+    min-height: 26px;
+    transition: all 160ms ease;
+}
+
+switch:checked {
+    background: linear-gradient(135deg, @mx_accent 0%, @mx_accent_deep 100%);
+    border-color: @mx_accent;
+}
+
+switch slider {
+    background: @mx_text_primary;
+    border-radius: 50%;
+    min-width: 20px;
+    min-height: 20px;
+    margin: 2px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Pattern cards
+   ───────────────────────────────────────────────────────────────────── */
+
+.mx4-pattern {
+    background: @mx_bg_card;
+    border: 1px solid @mx_border;
+    border-radius: 12px;
+    padding: 14px 10px;
+    transition: all 150ms ease;
+}
+
+.mx4-pattern:hover {
+    background: @mx_bg_elevated;
+    border-color: @mx_border_hover;
+}
+
+.mx4-pattern:checked,
+.mx4-pattern.selected {
+    background: @mx_accent_glow_soft;
+    border-color: @mx_accent;
+    box-shadow: 0 0 18px @mx_accent_glow;
+}
+
+.mx4-pattern-name {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: @mx_text_primary;
+}
+
+.mx4-pattern-sub {
+    font-size: 10.5px;
+    color: @mx_text_muted;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Mode card radios (Scroll page)
+   ───────────────────────────────────────────────────────────────────── */
+
+.mx4-mode {
+    background: @mx_bg_card;
+    border: 1px solid @mx_border;
+    border-radius: 12px;
+    padding: 14px 16px;
+    transition: all 140ms ease;
+}
+
+.mx4-mode:hover {
+    background: @mx_bg_elevated;
+    border-color: @mx_border_hover;
+}
+
+.mx4-mode:checked {
+    background: linear-gradient(180deg,
+        rgba(212, 165, 116, 0.18) 0%,
+        rgba(212, 165, 116, 0.06) 100%);
+    border-color: @mx_accent;
+    box-shadow: 0 0 16px @mx_accent_glow;
+}
+
+.mx4-mode-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: @mx_text_primary;
+}
+
+.mx4-mode:checked .mx4-mode-title { color: @mx_accent; }
+
+.mx4-mode-sub {
+    font-size: 10.5px;
+    color: @mx_text_muted;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Entries
+   ───────────────────────────────────────────────────────────────────── */
+
+entry.mx4-entry {
+    background: @mx_bg_secondary;
+    border: 1px solid @mx_border;
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: @mx_text_primary;
+    caret-color: @mx_accent;
+}
+
+entry.mx4-entry:focus-within {
+    border-color: @mx_accent;
+    box-shadow: 0 0 0 3px @mx_accent_glow_soft;
+}
+
+spinbutton.mx4-spin {
+    background: @mx_bg_secondary;
+    border: 1px solid @mx_border;
+    border-radius: 8px;
+    color: @mx_text_primary;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+spinbutton.mx4-spin button {
+    color: @mx_text_secondary;
+    border: none;
+    background: transparent;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Scrollbars (subtle)
+   ───────────────────────────────────────────────────────────────────── */
+
+scrollbar { background: transparent; }
+scrollbar slider {
+    background: @mx_text_muted;
+    border-radius: 4px;
+    min-width: 6px;
+    min-height: 6px;
+}
+scrollbar slider:hover {
+    background: @mx_accent;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Toast
+   ───────────────────────────────────────────────────────────────────── */
+
+toast {
+    background: @mx_bg_elevated;
+    border: 1px solid @mx_border;
+    border-radius: 10px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+}

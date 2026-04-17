@@ -1,17 +1,4 @@
-"""Scroll page.
-
-Full granular control over the main wheel + thumb wheel:
-
-* Scroll mode: SmartShift (auto) / Ratchet only / Free-spin.
-* SmartShift threshold slider — how sensitive the auto-switch is.
-* Hi-res scrolling toggle (smooth pixel-level scroll).
-* Invert vertical + invert horizontal toggles.
-* Thumb-wheel diversion (off = firmware does horizontal scroll,
-  on = daemon captures events so they can be bound to custom actions).
-* Thumb-wheel invert.
-
-All settings are pushed to the daemon and persisted in TOML.
-"""
+"""Scroll page — SmartShift, hi-res, direction, thumb wheel."""
 
 from __future__ import annotations
 
@@ -22,56 +9,56 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, GLib
 
+from ..widgets.common import section_title, page_title, setting_row
 from ...config import ConfigStore
 
 
-class ScrollPage(Adw.PreferencesPage):
-    def __init__(self, client):
-        super().__init__()
-        self.client = client
-        self.set_title("Scroll")
-        self.set_icon_name("view-continuous-symbolic")
+MODES = [
+    ("smart",   "SmartShift",    "Auto-switch by flick speed"),
+    ("ratchet", "Ratchet only",  "Notched, precise"),
+    ("free",    "Free-spin",     "Smooth momentum"),
+]
 
+
+class ScrollPage(Gtk.Box):
+    def __init__(self, client):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        self.client = client
         self.store = ConfigStore()
         self.cfg = self.store.config.scroll
         self.tw_cfg = self.store.config.thumbwheel
-
         self._updating = False
 
-        # ─── Scroll mode radio ────────────────────────────────────────
-        mode_group = Adw.PreferencesGroup(
-            title="Scroll mode",
-            description="How the main wheel behaves when you flick it.",
-        )
-        self.add(mode_group)
+        self.set_margin_top(4)
+        self.set_margin_bottom(24)
 
-        mode_row = Adw.ActionRow()
-        mode_row.set_activatable(False)
+        self.append(page_title(
+            "Scroll",
+            "Control the main wheel, SmartShift, and the thumb wheel."
+        ))
 
-        mode_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6,
-                           homogeneous=True, hexpand=True)
+        # ─── Mode group ─────────────────────────────────────────────
+        self.append(section_title("Scroll mode"))
+        modes_grid = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10,
+                             homogeneous=True)
+        self.append(modes_grid)
 
         self._mode_buttons: dict[str, Gtk.ToggleButton] = {}
-        modes = [
-            ("smart",   "SmartShift",     "Auto-switch by flick speed"),
-            ("ratchet", "Ratchet only",   "Notched, precise"),
-            ("free",    "Free-spin",      "Smooth momentum"),
-        ]
         group_root: Gtk.ToggleButton | None = None
-        for mode_id, name, desc in modes:
+        current_mode = "smart" if self.cfg.smartshift_enabled else "ratchet"
+
+        for mode_id, name, desc in MODES:
             b = Gtk.ToggleButton()
-            b.add_css_class("card")
+            b.add_css_class("mx4-mode")
             b.set_hexpand(True)
-            col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2,
+            col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4,
                           halign=Gtk.Align.CENTER,
-                          margin_top=10, margin_bottom=10,
-                          margin_start=6, margin_end=6)
-            title = Gtk.Label(label=name)
-            title.add_css_class("heading")
-            col.append(title)
+                          margin_top=4, margin_bottom=4)
+            name_lbl = Gtk.Label(label=name)
+            name_lbl.add_css_class("mx4-mode-title")
+            col.append(name_lbl)
             sub = Gtk.Label(label=desc)
-            sub.add_css_class("caption")
-            sub.add_css_class("dim-label")
+            sub.add_css_class("mx4-mode-sub")
             sub.set_wrap(True)
             col.append(sub)
             b.set_child(col)
@@ -79,98 +66,101 @@ class ScrollPage(Adw.PreferencesPage):
                 group_root = b
             else:
                 b.set_group(group_root)
-            b.set_active(self._current_mode() == mode_id)
+            b.set_active(mode_id == current_mode)
             b.connect("toggled", self._on_mode_toggled, mode_id)
             self._mode_buttons[mode_id] = b
-            mode_box.append(b)
+            modes_grid.append(b)
 
-        mode_row.set_child(mode_box)
-        mode_group.add(mode_row)
+        # SmartShift threshold
+        ss_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        ss_card.add_css_class("mx4-card")
+        self.append(ss_card)
 
-        # SmartShift sensitivity
-        ss_row = Adw.ActionRow(title="SmartShift threshold")
-        ss_row.set_subtitle(
-            "Lower values switch to free-spin at slower flick speeds"
+        ss_head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        ss_card.append(ss_head)
+        ss_title = Gtk.Label(label="SmartShift threshold", xalign=0)
+        ss_title.add_css_class("mx4-card-title")
+        ss_title.set_hexpand(True)
+        ss_head.append(ss_title)
+        self.ss_value = Gtk.Label(label=str(self.cfg.smartshift_threshold), xalign=1)
+        self.ss_value.add_css_class("mx4-card-value-small")
+        ss_head.append(self.ss_value)
+
+        ss_sub = Gtk.Label(
+            label="Lower values switch to free-spin at slower flick speeds.",
+            xalign=0,
         )
+        ss_sub.add_css_class("mx4-card-sub")
+        ss_sub.set_wrap(True)
+        ss_card.append(ss_sub)
+
         self.ss_scale = Gtk.Scale.new_with_range(
-            Gtk.Orientation.HORIZONTAL, 1, 50, 1
+            Gtk.Orientation.HORIZONTAL, 1, 50, 1,
         )
-        self.ss_scale.set_draw_value(True)
-        self.ss_scale.set_value(self.cfg.smartshift_threshold)
+        self.ss_scale.add_css_class("mx4-slider")
+        self.ss_scale.set_draw_value(False)
         self.ss_scale.set_hexpand(True)
-        self.ss_scale.set_size_request(240, -1)
+        self.ss_scale.set_value(self.cfg.smartshift_threshold)
         for mark in (1, 15, 30, 50):
             self.ss_scale.add_mark(mark, Gtk.PositionType.BOTTOM, str(mark))
         self.ss_scale.connect("value-changed", self._on_ss_changed)
-        ss_row.add_suffix(self.ss_scale)
-        mode_group.add(ss_row)
+        ss_card.append(self.ss_scale)
 
         # Hi-res toggle
-        self.hires_row = Adw.SwitchRow(title="High-resolution scrolling")
-        self.hires_row.set_subtitle("Smooth pixel-level scroll (may not work in all apps)")
-        self.hires_row.set_active(self.cfg.hires_enabled)
-        self.hires_row.connect("notify::active", self._on_hires_toggle)
-        mode_group.add(self.hires_row)
+        self.hires_switch = Gtk.Switch(active=self.cfg.hires_enabled)
+        self.hires_switch.connect("notify::active", self._on_hires_toggle)
+        self.append(setting_row(
+            "High-resolution scrolling",
+            "Smooth pixel-level scroll. Requires app support.",
+            self.hires_switch,
+        ))
 
-        # ─── Direction group ──────────────────────────────────────────
-        dir_group = Adw.PreferencesGroup(title="Scroll direction")
-        self.add(dir_group)
+        # ─── Direction ─────────────────────────────────────────────
+        self.append(section_title("Direction"))
 
-        self.inv_v_row = Adw.SwitchRow(title="Invert vertical")
-        self.inv_v_row.set_subtitle("Natural scrolling (up-flick scrolls down)")
-        self.inv_v_row.set_active(self.cfg.invert_vertical)
-        self.inv_v_row.connect("notify::active", self._on_invert_v)
-        dir_group.add(self.inv_v_row)
+        self.inv_v_switch = Gtk.Switch(active=self.cfg.invert_vertical)
+        self.inv_v_switch.connect("notify::active", self._on_invert_v)
+        self.append(setting_row(
+            "Invert vertical",
+            "Natural scrolling (up-flick scrolls content down).",
+            self.inv_v_switch,
+        ))
 
-        self.inv_h_row = Adw.SwitchRow(title="Invert horizontal")
-        self.inv_h_row.set_subtitle("Flip the thumb wheel direction")
-        self.inv_h_row.set_active(self.cfg.invert_horizontal)
-        self.inv_h_row.connect("notify::active", self._on_invert_h)
-        dir_group.add(self.inv_h_row)
+        self.inv_h_switch = Gtk.Switch(active=self.cfg.invert_horizontal)
+        self.inv_h_switch.connect("notify::active", self._on_invert_h)
+        self.append(setting_row(
+            "Invert horizontal",
+            "Flip the thumb-wheel direction.",
+            self.inv_h_switch,
+        ))
 
-        # ─── Thumb wheel group ────────────────────────────────────────
-        tw_group = Adw.PreferencesGroup(
-            title="Thumb wheel",
-            description=(
-                "The sideways wheel under the thumb. Enable diversion "
-                "to capture events in software for custom bindings."
-            ),
-        )
-        self.add(tw_group)
+        # ─── Thumb wheel ────────────────────────────────────────────
+        self.append(section_title("Thumb wheel"))
 
-        self.tw_divert_row = Adw.SwitchRow(title="Divert to software")
-        self.tw_divert_row.set_subtitle(
-            "When off, firmware does horizontal scroll by default"
-        )
-        self.tw_divert_row.set_active(self.tw_cfg.diverted)
-        self.tw_divert_row.connect("notify::active", self._on_tw_divert)
-        tw_group.add(self.tw_divert_row)
+        self.tw_divert_switch = Gtk.Switch(active=self.tw_cfg.diverted)
+        self.tw_divert_switch.connect("notify::active", self._on_tw_divert)
+        self.append(setting_row(
+            "Divert to software",
+            "When off, firmware does horizontal scroll by default.",
+            self.tw_divert_switch,
+        ))
 
-        self.tw_invert_row = Adw.SwitchRow(title="Invert thumb wheel")
-        self.tw_invert_row.set_subtitle("Flip the thumb-wheel direction")
-        self.tw_invert_row.set_active(self.tw_cfg.invert)
-        self.tw_invert_row.connect("notify::active", self._on_tw_invert)
-        tw_group.add(self.tw_invert_row)
+        self.tw_invert_switch = Gtk.Switch(active=self.tw_cfg.invert)
+        self.tw_invert_switch.connect("notify::active", self._on_tw_invert)
+        self.append(setting_row(
+            "Invert thumb wheel",
+            "Flip direction even when firmware is handling it.",
+            self.tw_invert_switch,
+        ))
 
-    # ─── helpers ────────────────────────────────────────────────────
-
-    def _current_mode(self) -> str:
-        if self.cfg.smartshift_enabled:
-            return "smart"
-        return "ratchet"  # "free" chosen explicitly via button
+    # ─── handlers ───────────────────────────────────────────────────
 
     def _save(self) -> None:
         self.store.save()
 
-    # ─── handlers ───────────────────────────────────────────────────
-
     def _on_mode_toggled(self, btn, mode_id):
         if self._updating or not btn.get_active():
             return
-        # Map UI mode onto HID++ setSmartShift:
-        #   smart:   smartshift_enabled=True,  wheel_mode=ratchet, auto_disengage=threshold
-        #   ratchet: smartshift_enabled=False, wheel_mode=ratchet, auto_disengage=0
-        #   free:    smartshift_enabled=False, wheel_mode=freespin, auto_disengage=0
         enabled = mode_id == "smart"
         self.cfg.smartshift_enabled = enabled
         self._save()
@@ -184,9 +174,9 @@ class ScrollPage(Adw.PreferencesPage):
         if self._updating:
             return
         thr = int(scale.get_value())
+        self.ss_value.set_text(str(thr))
         self.cfg.smartshift_threshold = thr
         self._save()
-        # Only write to device when SmartShift is the active mode
         if self.cfg.smartshift_enabled:
             threading.Thread(
                 target=lambda: self.client.set_smartshift(True, thr),
@@ -218,8 +208,6 @@ class ScrollPage(Adw.PreferencesPage):
     def _on_invert_h(self, row, _):
         self.cfg.invert_horizontal = row.get_active()
         self._save()
-        # Horizontal invert is handled by the thumb-wheel diversion path
-        # when enabled, or by the compositor otherwise; no firmware call.
 
     def _on_tw_divert(self, row, _):
         on = row.get_active()
