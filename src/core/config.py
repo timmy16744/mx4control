@@ -26,10 +26,12 @@ class HapticSettings:
     """Haptic feedback configuration"""
     enabled: bool = True
     intensity: int = 2  # 0=Subtle, 1=Low, 2=Medium, 3=High
+    selected_pattern: int = 2  # Currently selected pattern (0-14)
     notification_pattern: int = 0x0A  # Double tap
     scroll_end_pattern: int = 0x03  # Medium click
     notification_enabled: bool = True
     scroll_end_enabled: bool = False
+    device_switch_enabled: bool = True
 
 
 @dataclass

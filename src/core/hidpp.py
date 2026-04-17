@@ -17,7 +17,7 @@ try:
     import hid
 except ImportError:
     hid = None
-    print("Warning: hidapi not installed. Install with: pip install hidapi")
+    logging.warning("hidapi not installed. Install with: pip install hidapi")
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,9 @@ class FeatureID(IntEnum):
     FEATURE_SET = 0x0001
     FEATURE_INFO = 0x0002
     DEVICE_NAME = 0x0005
+    DEVICE_FRIENDLY_NAME = 0x0007
+    HOSTS_INFO = 0x1815
+    CHANGE_HOST = 0x1814
     BATTERY_STATUS = 0x1000
     BATTERY_VOLTAGE = 0x1001
     UNIFIED_BATTERY = 0x1004
@@ -144,7 +147,7 @@ class TaskID(IntEnum):
     MEDIA_MUTE = 0x006F
 
     # System actions
-    SHOW_DESKTOP = 0x006F
+    SHOW_DESKTOP = 0x0073
     LOCK_SCREEN = 0x0070
     SCREENSHOT = 0x0071
 
@@ -261,10 +264,18 @@ class HIDPPDevice:
             try:
                 self._raw_fd = os.open(self._device_path, os.O_RDWR)
                 logger.info(f"Opened {self._device_path} in raw mode")
-                self._discover_features()
+                try:
+                    self._discover_features()
+                except Exception as e:
+                    # Clean up file descriptor if feature discovery fails
+                    logger.warning(f"Feature discovery failed: {e}")
+                    os.close(self._raw_fd)
+                    self._raw_fd = None
+                    return False
                 return True
             except OSError as e:
                 logger.error(f"Failed to open {self._device_path}: {e}")
+                self._raw_fd = None
                 return False
 
         # Fall back to hidapi
@@ -334,14 +345,14 @@ class HIDPPDevice:
         # ROOT function 0x00 = getFeatureIndex, takes 16-bit feature ID as args
         try:
             response = self._request(0x00, 0x00, 0x00, 0x01)  # Get index of feature 0x0001
-            if response and response[0] != 0:
+            if response and len(response) >= 1 and response[0] != 0:
                 feature_set_index = response[0]
                 self._feature_cache[FeatureID.FEATURE_SET] = feature_set_index
                 logger.debug(f"FEATURE_SET at index {feature_set_index}")
 
                 # Query feature count using FEATURE_SET.getCount (function 0x00)
                 response = self._request(feature_set_index, 0x00)
-                if response:
+                if response and len(response) >= 1:
                     feature_count = response[0]
                     logger.info(f"Device has {feature_count} features")
 
@@ -349,7 +360,7 @@ class HIDPPDevice:
                     # Index 0 = ROOT, index 1 = first feature, etc.
                     for i in range(feature_count):
                         response = self._request(feature_set_index, 0x01, i)
-                        if response:
+                        if response and len(response) >= 2:
                             feature_id = (response[0] << 8) | response[1]
                             self._feature_cache[feature_id] = i  # Index matches loop index
                             logger.debug(f"Feature {feature_id:#06x} at index {i}")
@@ -367,7 +378,7 @@ class HIDPPDevice:
         # Query device for feature index using ROOT.getFeatureIndex
         # Function 0x00, args are the 16-bit feature ID (high byte, low byte)
         response = self._request(0x00, 0x00, (feature_id >> 8) & 0xFF, feature_id & 0xFF)
-        if response and response[0] != 0:
+        if response and len(response) >= 1 and response[0] != 0:
             self._feature_cache[feature_id] = response[0]
             return response[0]
         return None
@@ -432,10 +443,11 @@ class HIDPPDevice:
                         if resp_device == self._device_index and resp_feature == 0xFF:
                             # Error response format:
                             # [report, device, 0xFF, feature, function, error_code, ...]
-                            error_feature = response[3]
-                            if error_feature == feature_index:
-                                error_code = response[5]  # Error code is at byte 5
-                                raise HIDPPError(error_code)
+                            if len(response) >= 6:
+                                error_feature = response[3]
+                                if error_feature == feature_index:
+                                    error_code = response[5]  # Error code is at byte 5
+                                    raise HIDPPError(error_code)
 
                         # Check if response matches our request
                         if resp_device == self._device_index and resp_feature == feature_index:
@@ -492,6 +504,23 @@ class MXMaster4(HIDPPDevice):
     # ─────────────────────────────────────────────────────────────────
     # Device Information
     # ─────────────────────────────────────────────────────────────────
+
+    def ping(self) -> bool:
+        """Quick single-request liveness probe.
+
+        Used by the window's health-check loop to detect a dropped Bolt
+        link without the expense of the full ``get_device_info`` (which
+        issues 4+ requests and is much more likely to timeout under
+        light contention with the notification-listener thread).
+        """
+        if not self.is_open:
+            return False
+        try:
+            # ROOT.getProtocolVersion — always present, always cheap.
+            response = self._request(0x00, 0x01)
+            return response is not None
+        except Exception:
+            return False
 
     def get_device_info(self) -> Optional[DeviceInfo]:
         """Get comprehensive device information"""
@@ -551,7 +580,7 @@ class MXMaster4(HIDPPDevice):
         try:
             # Try UNIFIED_BATTERY first (newer devices)
             response = self.request(FeatureID.UNIFIED_BATTERY, 0x00)
-            if response:
+            if response and len(response) >= 3:
                 level = response[0]
                 status = response[2]
                 charging = status in (1, 2, 3)  # Charging states
@@ -559,7 +588,7 @@ class MXMaster4(HIDPPDevice):
 
             # Fallback to BATTERY_STATUS
             response = self.request(FeatureID.BATTERY_STATUS, 0x00)
-            if response:
+            if response and len(response) >= 3:
                 level = response[0]
                 charging = response[2] != 0
                 return level, charging
@@ -571,11 +600,122 @@ class MXMaster4(HIDPPDevice):
         """Query firmware version"""
         try:
             response = self.request(FeatureID.ROOT, 0x01)
-            if response:
+            if response and len(response) >= 3:
                 return f"{response[0]}.{response[1]}.{response[2]:04x}"
         except Exception:
             pass
         return None
+
+    # ─────────────────────────────────────────────────────────────────
+    # Friendly name (user-settable) & Easy-Switch host management
+    # ─────────────────────────────────────────────────────────────────
+
+    def get_friendly_name(self) -> Optional[str]:
+        """Return the user-settable friendly name (feature 0x0007).
+
+        Falls back to the underlying device name if the feature isn't
+        available on this firmware.
+        """
+        try:
+            if not self.has_feature(FeatureID.DEVICE_FRIENDLY_NAME):
+                return self._get_device_name()
+            response = self.request(FeatureID.DEVICE_FRIENDLY_NAME, 0x00)
+            if not response:
+                return self._get_device_name()
+            name_len = response[0]
+            name = b""
+            offset = 0
+            while len(name) < name_len:
+                chunk = self.request(FeatureID.DEVICE_FRIENDLY_NAME, 0x01, offset)
+                if not chunk:
+                    break
+                # Each chunk is [offset_echo, ...14 bytes of name]
+                data = chunk[1:]
+                remaining = name_len - len(name)
+                name += data[:min(len(data), remaining)]
+                offset += 14
+            return name.decode("utf-8", errors="ignore").strip("\x00") or None
+        except Exception as e:
+            logger.debug(f"get_friendly_name failed: {e}")
+            return self._get_device_name()
+
+    def get_hosts_info(self) -> Optional[dict]:
+        """Query Easy-Switch host state (feature 0x1815).
+
+        Returns a dict with total host count, currently-paired host index,
+        and a per-host list of {paired, bus_type, name} entries, or None
+        if the feature isn't supported.
+        """
+        try:
+            if not self.has_feature(FeatureID.HOSTS_INFO):
+                return None
+            response = self.request(FeatureID.HOSTS_INFO, 0x00)
+            if not response or len(response) < 3:
+                return None
+            # Layout per HID++ 2.0 feature 0x1815 v1+:
+            # [flags, numHosts, currentHost, ...]
+            num_hosts = response[1]
+            current_host = response[2]
+            hosts = []
+            for idx in range(num_hosts):
+                hr = self.request(FeatureID.HOSTS_INFO, 0x01, idx)
+                if not hr or len(hr) < 5:
+                    hosts.append(None)
+                    continue
+                # [hostIdx, paired, name_len, bus_type, page, ...]
+                paired = bool(hr[1])
+                name_len = hr[2]
+                bus_type = hr[3]
+                # Optional: query host name via function 0x02
+                name = self._get_host_name(idx, name_len)
+                hosts.append({
+                    "index": idx,
+                    "paired": paired,
+                    "bus_type": bus_type,
+                    "name": name,
+                })
+            return {
+                "num_hosts": num_hosts,
+                "current_host": current_host,
+                "hosts": hosts,
+            }
+        except Exception as e:
+            logger.debug(f"get_hosts_info failed: {e}")
+            return None
+
+    def _get_host_name(self, host_index: int, name_len: int) -> str:
+        """Read a host's friendly name via HOSTS_INFO function 0x02."""
+        if name_len <= 0:
+            return ""
+        try:
+            name = b""
+            offset = 0
+            while len(name) < name_len:
+                chunk = self.request(FeatureID.HOSTS_INFO, 0x02, host_index, offset)
+                if not chunk:
+                    break
+                # [host_idx_echo, offset_echo, ...name bytes]
+                data = chunk[2:]
+                remaining = name_len - len(name)
+                name += data[:min(len(data), remaining)]
+                offset += 14
+            return name.decode("utf-8", errors="ignore").strip("\x00")
+        except Exception:
+            return ""
+
+    def switch_to_host(self, host_index: int) -> bool:
+        """Switch the mouse to a different paired host (feature 0x1814)."""
+        try:
+            if not self.has_feature(FeatureID.CHANGE_HOST):
+                return False
+            # Function 0x01 = setHost(host_index)
+            response = self.request(FeatureID.CHANGE_HOST, 0x01, host_index)
+            if response is not None:
+                logger.info(f"Switched to host {host_index}")
+                return True
+        except Exception as e:
+            logger.error(f"switch_to_host failed: {e}")
+        return False
 
     # ─────────────────────────────────────────────────────────────────
     # Haptic Feedback
@@ -612,25 +752,25 @@ class MXMaster4(HIDPPDevice):
             data = struct.pack('>3s', bytes([pattern_value, 0, 0]))
             msg = struct.pack('>BBH', 0x10, self._device_index, HAPTIC_FEATURE_ID) + data
 
-            if self._use_raw and self._raw_fd is not None:
-                os.write(self._raw_fd, msg)
-
-                # Wait for response
-                r, _, _ = select.select([self._raw_fd], [], [], 0.5)
-                if r:
-                    response = os.read(self._raw_fd, 20)
-                    # Check for error (byte 2 == 0xFF indicates error)
-                    if len(response) > 2 and response[2] == 0xFF:
-                        logger.error(f"Haptic error: {response[4]:#04x}")
-                        return False
-                    return True
-                return False
-            elif self._device:
-                self._device.write(bytes(msg))
-                response = self._device.read(20, 500)
-                if response and response[2] != 0xFF:
-                    return True
-                return False
+            # Serialize with _request so the notification listener and
+            # other HID++ calls can't race on the hidraw fd.
+            with self._lock:
+                if self._use_raw and self._raw_fd is not None:
+                    os.write(self._raw_fd, msg)
+                    r, _, _ = select.select([self._raw_fd], [], [], 0.5)
+                    if r:
+                        response = os.read(self._raw_fd, 20)
+                        if len(response) > 2 and response[2] == 0xFF:
+                            logger.error(f"Haptic error: {response[4]:#04x}")
+                            return False
+                        return True
+                    return False
+                elif self._device:
+                    self._device.write(bytes(msg))
+                    response = self._device.read(20, 500)
+                    if response and response[2] != 0xFF:
+                        return True
+                    return False
 
             return False
         except Exception as e:
@@ -667,7 +807,7 @@ class MXMaster4(HIDPPDevice):
         """Get current haptic intensity setting"""
         try:
             response = self.request(FeatureID.MX_HAPTICS, 0x02)  # Get intensity
-            if response:
+            if response and len(response) >= 1:
                 self._haptic_intensity = response[0]
         except Exception:
             pass
@@ -685,7 +825,7 @@ class MXMaster4(HIDPPDevice):
             try:
                 # Try reading - response format varies by device
                 response = self.request(FeatureID.ADJUSTABLE_DPI, 0x01, 0)
-                if response:
+                if response and len(response) >= 3:
                     # Try parsing as big-endian DPI at bytes 1-2
                     dpi = (response[1] << 8) | response[2]
                     if 200 <= dpi <= 8000:
@@ -728,14 +868,17 @@ class MXMaster4(HIDPPDevice):
         """Get list of available DPI presets"""
         try:
             response = self.request(FeatureID.ADJUSTABLE_DPI, 0x02)
-            if response:
+            if response and len(response) >= 1:
                 count = response[0]
                 dpis = []
                 for i in range(count):
-                    if 1 + i * 2 + 1 < len(response):
-                        dpi = (response[1 + i * 2] << 8) | response[2 + i * 2]
+                    # Each DPI entry is 2 bytes, starting at offset 1
+                    offset = 1 + i * 2
+                    if offset + 1 < len(response):
+                        dpi = (response[offset] << 8) | response[offset + 1]
                         dpis.append(dpi)
-                return dpis
+                if dpis:
+                    return dpis
         except Exception:
             pass
         # Default presets
@@ -771,7 +914,7 @@ class MXMaster4(HIDPPDevice):
             #   byte 1: auto_disengage threshold (1-255, 0=disabled)
             #   byte 2: default_auto_disengage
             response = self.request(feature, 0x00)
-            if response:
+            if response and len(response) >= 2:
                 wheel_mode = response[0]
                 auto_disengage = response[1]
                 # SmartShift is "enabled" if auto_disengage > 0
@@ -848,7 +991,7 @@ class MXMaster4(HIDPPDevice):
         """Get number of programmable buttons"""
         try:
             response = self.request(FeatureID.REPROG_CONTROLS_V4, 0x00)
-            if response:
+            if response and len(response) >= 1:
                 return response[0]
         except Exception:
             pass
@@ -870,7 +1013,7 @@ class MXMaster4(HIDPPDevice):
                 0x01,
                 button_index,
             )
-            if response:
+            if response and len(response) >= 5:
                 cid = (response[0] << 8) | response[1]
                 tid = (response[2] << 8) | response[3]
                 flags = response[4]
@@ -939,7 +1082,7 @@ class MXMaster4(HIDPPDevice):
                 (cid >> 8) & 0xFF,
                 cid & 0xFF,
             )
-            if response:
+            if response and len(response) >= 6:
                 # Response: cid (2), flags (2), remap_cid (2)
                 remap_cid = (response[4] << 8) | response[5]
                 return remap_cid
@@ -1003,13 +1146,11 @@ class MXMaster4(HIDPPDevice):
             )
             if response is not None:
                 logger.info(f"Button CID 0x{cid:04X} divert={'enabled' if diverted else 'disabled'}")
-                print(f">>> Button CID 0x{cid:04X} divert={'enabled' if diverted else 'disabled'}")
                 return True
             else:
-                print(f">>> Button divert failed: no response for CID 0x{cid:04X}")
+                logger.debug(f"Button divert failed: no response for CID 0x{cid:04X}")
         except Exception as e:
-            logger.error(f"Failed to divert button: {e}")
-            print(f">>> Failed to divert button CID 0x{cid:04X}: {e}")
+            logger.error(f"Failed to divert button CID 0x{cid:04X}: {e}")
         return False
 
     def start_notification_listener(self, callback: Callable[[int, int, bytes], None]) -> bool:
@@ -1036,7 +1177,6 @@ class MXMaster4(HIDPPDevice):
         )
         self._notification_thread.start()
         logger.info("HID++ notification listener started")
-        print(">>> HID++ notification listener STARTED")
         return True
 
     def stop_notification_listener(self):
@@ -1048,25 +1188,46 @@ class MXMaster4(HIDPPDevice):
         logger.info("HID++ notification listener stopped")
 
     def _notification_loop(self):
-        """Background thread that listens for HID++ notifications"""
+        """Background thread that listens for HID++ notifications.
+
+        The hidraw fd is shared with :meth:`_request`, so reads must be
+        serialized under ``self._lock`` — otherwise an in-flight request
+        response can be stolen by this thread (or vice versa), causing
+        spurious timeouts that falsely mark the device dead.
+        """
         import os
         import select
 
         if not self.is_open:
             return
 
-        logger.debug("Notification loop started")
-        print(f">>> Notification loop started, device_index={self._device_index}, use_raw={self._use_raw}, fd={self._raw_fd}")
+        logger.debug(f"Notification loop started, device_index={self._device_index}")
 
         while self._notification_running:
             try:
                 if self._use_raw and self._raw_fd is not None:
-                    # Non-blocking read with select
+                    # select without the lock — only acquire when there's data
                     r, _, _ = select.select([self._raw_fd], [], [], 0.1)
                     if not r:
                         continue
 
-                    data = os.read(self._raw_fd, self.REPORT_LONG)
+                    # Take the lock so a concurrent _request can't race us
+                    # reading the same byte stream. Use a non-blocking
+                    # acquire: if a request is in flight it'll consume the
+                    # response itself, and we'll pick up genuine async
+                    # notifications on a later iteration.
+                    if not self._lock.acquire(blocking=False):
+                        # Give up this tick; loop back and try again
+                        time.sleep(0.005)
+                        continue
+                    try:
+                        # Re-check there's still data after acquiring
+                        r2, _, _ = select.select([self._raw_fd], [], [], 0)
+                        if not r2:
+                            continue
+                        data = os.read(self._raw_fd, self.REPORT_LONG)
+                    finally:
+                        self._lock.release()
                     if not data:
                         continue
 
@@ -1080,8 +1241,7 @@ class MXMaster4(HIDPPDevice):
                     feature_idx = data[2]
                     function_sw = data[3]
 
-                    # Debug: print all received data
-                    print(f">>> HID++ DATA: dev={device_idx} feat={feature_idx} func_sw={function_sw:#04x} data={data[:8].hex()}")
+                    logger.debug(f"HID++ notification: dev={device_idx} feat={feature_idx} func_sw={function_sw:#04x}")
 
                     # Check if this is for our device
                     if device_idx != self._device_index:
@@ -1179,6 +1339,7 @@ def _query_bolt_receiver(hidraw_path: str) -> list[dict]:
     import select
 
     devices = []
+    fd = None
 
     try:
         fd = os.open(hidraw_path, os.O_RDWR)
@@ -1212,7 +1373,12 @@ def _query_bolt_receiver(hidraw_path: str) -> list[dict]:
                 continue
 
             # Parse pairing info (data starts after 5-byte header)
+            if len(resp) < 12:
+                continue
             data = resp[5:]
+            if len(data) < 7:
+                continue
+
             device_kind = data[0] & 0x0F
             wpid = (data[2] << 8) | data[1]  # Little endian
             device_serial = data[3:7].hex().upper()
@@ -1228,8 +1394,14 @@ def _query_bolt_receiver(hidraw_path: str) -> list[dict]:
                 })
                 logger.info(f"Found {MX_MASTER_4_PIDS[wpid]} at slot {slot}")
 
+    except Exception as e:
+        logger.debug(f"Error querying Bolt receiver: {e}")
     finally:
-        os.close(fd)
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
     return devices
 

@@ -519,6 +519,19 @@ switch slider {
     background: @error;
 }
 
+.settings-card.battery-low .value-label {
+    color: @warning;
+}
+
+.settings-card.battery-low {
+    border-color: @warning;
+    box-shadow: 0 0 16px rgba(251, 191, 36, 0.2);
+}
+
+.settings-card.battery-charging .value-label {
+    color: @success;
+}
+
 @keyframes charging-pulse {
     0%, 100% { opacity: 0.8; }
     50% { opacity: 1; }
@@ -647,6 +660,15 @@ entry:focus {
 }
 
 /* ─────────────────────────────────────────────────────────────────────
+   Actions Ring overlay window — must be transparent so Cairo drawing shows
+   ───────────────────────────────────────────────────────────────────── */
+
+.actions-ring-overlay,
+.actions-ring-overlay > * {
+    background-color: transparent;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
    Toast Notifications
    ───────────────────────────────────────────────────────────────────── */
 
@@ -705,5 +727,10 @@ entry:focus {
 
     def _on_preferences(self, action, param):
         """Show preferences dialog"""
-        # TODO: Implement preferences dialog
-        pass
+        from ui.dialogs.preferences import PreferencesDialog
+
+        dialog = PreferencesDialog(
+            parent=self.get_active_window(),
+            config_manager=self.config_manager
+        )
+        dialog.present()

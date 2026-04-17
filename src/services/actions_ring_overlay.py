@@ -38,32 +38,40 @@ else:
 
 
 def get_mouse_position() -> Tuple[int, int]:
-    """Get current mouse position using xdotool or other methods"""
+    """Return the cursor position in global layout coordinates.
+
+    Tries Hyprland's IPC first (reliable on Wayland), then xdotool (X11 /
+    XWayland). Falls back to primary-monitor center.
+    """
+    # Hyprland IPC
     try:
-        # Try xdotool first (works on X11 and some Wayland compositors with XWayland)
         result = subprocess.run(
-            ['xdotool', 'getmouselocation', '--shell'],
-            capture_output=True,
-            text=True,
-            timeout=1
+            ["hyprctl", "cursorpos", "-j"],
+            capture_output=True, text=True, timeout=0.3,
+        )
+        if result.returncode == 0:
+            import json as _json
+            data = _json.loads(result.stdout)
+            return int(data["x"]), int(data["y"])
+    except Exception as e:
+        logger.debug(f"hyprctl cursorpos failed: {e}")
+
+    # xdotool fallback (X11)
+    try:
+        result = subprocess.run(
+            ["xdotool", "getmouselocation", "--shell"],
+            capture_output=True, text=True, timeout=0.3,
         )
         if result.returncode == 0:
             x, y = 0, 0
-            for line in result.stdout.strip().split('\n'):
-                if line.startswith('X='):
-                    x = int(line.split('=')[1])
-                elif line.startswith('Y='):
-                    y = int(line.split('=')[1])
+            for line in result.stdout.strip().split("\n"):
+                if line.startswith("X="):
+                    x = int(line.split("=")[1])
+                elif line.startswith("Y="):
+                    y = int(line.split("=")[1])
             return x, y
     except Exception as e:
         logger.debug(f"xdotool failed: {e}")
-
-    try:
-        # Fallback: try using slurp (Wayland) - but this is interactive
-        # For now, return screen center as fallback
-        pass
-    except Exception:
-        pass
 
     # Fallback to screen center
     display = Gdk.Display.get_default()
@@ -74,7 +82,23 @@ def get_mouse_position() -> Tuple[int, int]:
             geometry = monitor.get_geometry()
             return geometry.x + geometry.width // 2, geometry.y + geometry.height // 2
 
-    return 960, 540  # Default fallback
+    return 960, 540
+
+
+def _find_monitor_for_point(x: int, y: int):
+    """Return the GdkMonitor that contains the point (x, y), or the primary monitor."""
+    display = Gdk.Display.get_default()
+    if not display:
+        return None
+    monitors = display.get_monitors()
+    n = monitors.get_n_items() if monitors else 0
+    primary = monitors.get_item(0) if n > 0 else None
+    for i in range(n):
+        m = monitors.get_item(i)
+        g = m.get_geometry()
+        if g.x <= x < g.x + g.width and g.y <= y < g.y + g.height:
+            return m
+    return primary
 
 
 @dataclass
@@ -104,6 +128,9 @@ class ActionsRingOverlay(Gtk.Window):
 
         self.selected_index: Optional[int] = None
         self.on_action_selected: Optional[Callable[[int, RingSegment], None]] = None
+        # Fires on every selection change (including None<->segment) so the
+        # gesture service can play a haptic tick at each boundary crossing.
+        self.on_segment_change: Optional[Callable[[Optional[int]], None]] = None
 
         # Default segments - arranged clockwise from top
         self.segments: list[RingSegment] = [
@@ -146,21 +173,8 @@ class ActionsRingOverlay(Gtk.Window):
             except Exception as e:
                 print(f">>> Layer shell init failed: {e}")
 
-        # Enable transparency
+        # Enable transparency (CSS for this class is defined in the app's main stylesheet)
         self.add_css_class("actions-ring-overlay")
-
-        # Apply CSS for transparency
-        css_provider = Gtk.CssProvider()
-        css_provider.load_from_string("""
-            .actions-ring-overlay {
-                background-color: transparent;
-            }
-        """)
-        Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(),
-            css_provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-        )
 
     def _setup_drawing(self):
         """Set up the drawing area"""
@@ -320,10 +334,59 @@ class ActionsRingOverlay(Gtk.Window):
             cr.show_text(label)
 
     def show_overlay(self):
-        """Show the overlay centered on screen"""
+        """Show the overlay positioned at the current cursor location.
+
+        On Hyprland (Wayland) we ask the compositor for the live cursor
+        coordinates and use layer-shell margins to anchor the ring at
+        that point, centred on the cursor. Falls back to a centred
+        overlay on the primary monitor when the cursor position can't
+        be determined.
+        """
         self.selected_index = None
+
+        cursor_x, cursor_y = get_mouse_position()
+        self._position_at(cursor_x, cursor_y)
+
         self.present()
         self.drawing_area.queue_draw()
+
+    def _position_at(self, global_x: int, global_y: int):
+        """Anchor the overlay at the given global (layout) coordinates.
+
+        Uses layer-shell edge anchors + margins scoped to whatever
+        monitor contains the cursor. Clamps so the ring stays fully
+        on-screen even near edges.
+        """
+        if not LAYER_SHELL_AVAILABLE:
+            return
+
+        monitor = _find_monitor_for_point(global_x, global_y)
+        if monitor is None:
+            return
+
+        geom = monitor.get_geometry()
+        local_x = global_x - geom.x
+        local_y = global_y - geom.y
+
+        size = self.WINDOW_SIZE
+        half = size // 2
+
+        # Top-left corner of the overlay within the monitor, clamped so
+        # the full ring is visible even if the cursor is near a corner.
+        margin_left = max(0, min(geom.width - size, local_x - half))
+        margin_top = max(0, min(geom.height - size, local_y - half))
+
+        try:
+            Gtk4LayerShell.set_monitor(self, monitor)
+            # Anchor to top-left so margins behave as offsets from (0, 0)
+            Gtk4LayerShell.set_anchor(self, Gtk4LayerShell.Edge.TOP, True)
+            Gtk4LayerShell.set_anchor(self, Gtk4LayerShell.Edge.LEFT, True)
+            Gtk4LayerShell.set_anchor(self, Gtk4LayerShell.Edge.BOTTOM, False)
+            Gtk4LayerShell.set_anchor(self, Gtk4LayerShell.Edge.RIGHT, False)
+            Gtk4LayerShell.set_margin(self, Gtk4LayerShell.Edge.TOP, margin_top)
+            Gtk4LayerShell.set_margin(self, Gtk4LayerShell.Edge.LEFT, margin_left)
+        except Exception as e:
+            logger.debug(f"layer-shell positioning failed: {e}")
 
     def hide_overlay(self) -> Optional[RingSegment]:
         """Hide the overlay and return the selected segment"""
@@ -357,30 +420,33 @@ class ActionsRingOverlay(Gtk.Window):
             self.drawing_area.queue_draw()
 
     def update_from_position(self, dx: int, dy: int):
-        """Update selection based on relative mouse movement - very responsive"""
+        """Update selection based on relative mouse movement - very responsive.
+
+        Fires ``on_segment_change`` whenever the highlighted segment changes
+        so callers can play a haptic tick at each boundary crossing.
+        """
         distance = math.sqrt(dx*dx + dy*dy)
 
         # Center deadzone = cancel zone (about 40 pixels)
         if distance < 40:
-            self.selected_index = None  # Cancel zone
+            new_index: Optional[int] = None
         else:
-            # Calculate angle and map to segment
-            # atan2 gives angle in radians: 0 = right, pi/2 = down, pi = left, -pi/2 = up
             angle = math.atan2(dy, dx)
-
-            # Adjust so 0 radians is at top (up direction)
-            # Rotate by -90 degrees (subtract pi/2)
+            # Rotate so segment 0 is at the top (up direction)
             angle = angle + math.pi / 2
-
-            # Normalize to 0 to 2*pi range
             if angle < 0:
                 angle += 2 * math.pi
-
-            # Map to segment (0-7), with segment 0 at top
             segment_angle = 2 * math.pi / self.SEGMENT_COUNT
-            self.selected_index = int((angle + segment_angle / 2) / segment_angle) % self.SEGMENT_COUNT
+            new_index = int((angle + segment_angle / 2) / segment_angle) % self.SEGMENT_COUNT
 
-        self.drawing_area.queue_draw()
+        if new_index != self.selected_index:
+            self.selected_index = new_index
+            self.drawing_area.queue_draw()
+            if self.on_segment_change:
+                try:
+                    self.on_segment_change(new_index)
+                except Exception as e:
+                    logger.debug(f"on_segment_change handler raised: {e}")
 
     def set_segments(self, segments: list[RingSegment]):
         """Update the segment configuration"""

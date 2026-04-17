@@ -207,6 +207,7 @@ class ScrollPage(Gtk.Box):
         mode_card.append(mode_buttons)
 
         self.mode_group = None
+        self.mode_buttons = []
         modes = [
             ("smart", "SmartShift", "Auto-switch based on speed"),
             ("ratchet", "Ratchet", "Notched, precise scrolling"),
@@ -216,6 +217,7 @@ class ScrollPage(Gtk.Box):
         for mode_id, name, desc in modes:
             btn = Gtk.ToggleButton()
             btn.mode_id = mode_id
+            self.mode_buttons.append(btn)
 
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
             box.set_margin_start(16)
@@ -462,22 +464,40 @@ class ScrollPage(Gtk.Box):
             logging.getLogger(__name__).error(f"Failed to save config: {e}")
 
     def update_device(self, device):
-        """Update page with new device connection"""
+        """Update page with new device connection.
+
+        Pulls live SmartShift state from the device so the UI matches
+        what the firmware actually has configured.
+        """
         self.device = device
 
-        if device:
-            # Load settings from saved config
-            try:
-                config = self.window.config_manager.config
-                self.ss_scale.set_value(config.scroll.smartshift_threshold)
+        if not device:
+            return
 
-                # Set mode based on config
-                # Find and activate the appropriate mode button
-                for child in self.mode_group.get_parent().observe_children():
-                    if hasattr(child, 'mode_id'):
-                        if config.scroll.smartshift_enabled and child.mode_id == "smart":
-                            child.set_active(True)
-                            break
+        import threading
+
+        def fetch_and_apply():
+            enabled, threshold = True, 25
+            try:
+                enabled, threshold = device.get_smartshift_status()
             except Exception:
-                # Fallback to defaults
-                self.ss_scale.set_value(25)
+                pass
+            GLib.idle_add(self._apply_scroll_state, enabled, threshold)
+
+        threading.Thread(target=fetch_and_apply, daemon=True).start()
+
+    def _apply_scroll_state(self, enabled: bool, threshold: int):
+        """Update scroll UI and persist to config (main thread)."""
+        self.ss_scale.set_value(threshold)
+        target_mode = "smart" if enabled else "ratchet"
+        for btn in self.mode_buttons:
+            if btn.mode_id == target_mode:
+                btn.set_active(True)
+                break
+        try:
+            self.window.config_manager.config.scroll.smartshift_enabled = enabled
+            self.window.config_manager.config.scroll.smartshift_threshold = threshold
+            self.window.config_manager.save()
+        except Exception:
+            pass
+        return False

@@ -7,7 +7,8 @@ keystrokes, application launches, and shell commands.
 
 import subprocess
 import logging
-import re
+import shlex
+import threading
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -161,7 +162,7 @@ class ActionExecutor:
                     key = part
 
             if not key:
-                print(f">>> wtype: no key found in '{shortcut}'")
+                logger.debug(f"wtype: no key found in '{shortcut}'")
                 return False
 
             # Build wtype command
@@ -172,24 +173,20 @@ class ActionExecutor:
             for mod in reversed(modifiers):
                 cmd.extend(['-m', mod])
 
-            print(f">>> Running wtype: {' '.join(cmd)}")
+            logger.debug(f"Running wtype: {' '.join(cmd)}")
             result = subprocess.run(cmd, capture_output=True, timeout=2)
 
             if result.returncode == 0:
-                print(f">>> wtype SUCCESS")
-                logger.debug(f"wtype executed: {' '.join(cmd)}")
+                logger.debug(f"wtype executed successfully: {' '.join(cmd)}")
                 return True
             else:
-                print(f">>> wtype FAILED: {result.stderr.decode()}")
                 logger.debug(f"wtype failed: {result.stderr.decode()}")
                 return False
 
         except FileNotFoundError:
-            print(">>> wtype not found!")
             logger.debug("wtype not found")
             return False
         except Exception as e:
-            print(f">>> wtype error: {e}")
             logger.debug(f"wtype error: {e}")
             return False
 
@@ -315,16 +312,31 @@ class ActionExecutor:
         logger.info(f"Executing command: {command}")
 
         try:
-            # Use subprocess.Popen for non-blocking execution
+            # Parse command safely using shlex to prevent shell injection
+            # This splits the command respecting quotes and escapes
+            args = shlex.split(command)
+
+            if not args:
+                logger.error("Empty command after parsing")
+                return False
+
+            # Use subprocess.Popen with shell=False for security
             subprocess.Popen(
-                command,
-                shell=True,
+                args,
+                shell=False,
                 start_new_session=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
             return True
 
+        except ValueError as e:
+            # shlex.split raises ValueError for malformed strings (unclosed quotes)
+            logger.error(f"Invalid command syntax: {e}")
+            return False
+        except FileNotFoundError:
+            logger.error(f"Command not found: {command.split()[0] if command else 'unknown'}")
+            return False
         except Exception as e:
             logger.error(f"Command execution failed: {e}")
             return False
@@ -380,15 +392,19 @@ class ActionExecutor:
         return False
 
 
-# Global executor instance
+# Global executor instance with thread-safe initialization
 _executor: Optional[ActionExecutor] = None
+_executor_lock = threading.Lock()
 
 
 def get_executor() -> ActionExecutor:
-    """Get or create the global action executor"""
+    """Get or create the global action executor (thread-safe)"""
     global _executor
     if _executor is None:
-        _executor = ActionExecutor()
+        with _executor_lock:
+            # Double-check after acquiring lock
+            if _executor is None:
+                _executor = ActionExecutor()
     return _executor
 
 

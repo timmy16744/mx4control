@@ -345,6 +345,7 @@ class OverviewPage(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.window = window
         self.device = None
+        self._compact = False
 
         self.add_css_class("page-content")
         self.set_margin_start(24)
@@ -352,14 +353,27 @@ class OverviewPage(Gtk.Box):
         self.set_margin_top(16)
         self.set_margin_bottom(24)
 
-        # Content layout
+        # Wrap content in a ScrolledWindow so that narrow/short window
+        # sizes don't clip stats or Easy-Switch buttons. Allow scroll in
+        # both directions as a safety net for very narrow windows.
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_propagate_natural_width(False)
+        scroll.set_propagate_natural_height(True)
+        scroll.set_vexpand(True)
+        self.append(scroll)
+
+        # Content layout — orientation is flipped by set_compact_layout
+        # when the window drops below the medium breakpoint.
         content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=24)
         content.set_vexpand(True)
-        self.append(content)
+        self._content_box = content
+        scroll.set_child(content)
 
         # Left side - Device preview
         left_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         left_box.set_hexpand(True)
+        self._left_box = left_box
         content.append(left_box)
 
         # Device card
@@ -401,6 +415,7 @@ class OverviewPage(Gtk.Box):
         # Right side - Stats cards
         right_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         right_box.set_hexpand(True)
+        self._right_box = right_box
         content.append(right_box)
 
         # Section title
@@ -461,6 +476,21 @@ class OverviewPage(Gtk.Box):
         identify_btn.add_css_class("ghost-button")
         identify_btn.connect("clicked", self._on_identify)
         action_box.append(identify_btn)
+
+        # Easy-Switch host section (populated when device connects)
+        self.hosts_section = Gtk.Label(label="Easy-Switch")
+        self.hosts_section.add_css_class("section-title")
+        self.hosts_section.set_halign(Gtk.Align.START)
+        self.hosts_section.set_margin_top(16)
+        self.hosts_section.set_visible(False)
+        right_box.append(self.hosts_section)
+
+        self.hosts_card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.hosts_card.add_css_class("settings-card")
+        self.hosts_card.set_visible(False)
+        right_box.append(self.hosts_card)
+
+        self._host_buttons = []
 
         # Spacer
         spacer = Gtk.Box(vexpand=True)
@@ -569,32 +599,68 @@ class OverviewPage(Gtk.Box):
             def fetch_data():
                 info = device.get_device_info()
                 dpi = device.get_dpi()
-                GLib.idle_add(self._update_ui, info, dpi)
+                # Prefer the user-settable friendly name when the feature exists
+                friendly = None
+                try:
+                    friendly = device.get_friendly_name()
+                except Exception:
+                    pass
+                hosts = None
+                try:
+                    hosts = device.get_hosts_info()
+                except Exception:
+                    pass
+                GLib.idle_add(self._update_ui, info, dpi, friendly, hosts)
 
             threading.Thread(target=fetch_data, daemon=True).start()
         else:
-            self._update_ui(None, 0)
+            self._update_ui(None, 0, None, None)
 
-    def _update_ui(self, info, dpi):
+    def _update_ui(self, info, dpi, friendly=None, hosts=None):
         """Update UI elements (called on main thread)"""
         if info:
-            # Update device name
-            self.device_name.set_label(info.name)
+            # Update device name — prefer user-configurable friendly name
+            self.device_name.set_label(friendly or info.name)
 
-            # Update connection status
+            # Connection type strings — distinguish Bolt receiver from
+            # Bluetooth, and mark charging explicitly. The MX Master 4 does
+            # NOT enumerate as a separate USB device when the charge cable
+            # is plugged in; the transport stays Bolt/Bluetooth either way.
+            transport_display, transport_unit = self._format_transport(info)
+
+            # Update connection status badge
             self.conn_dot.remove_css_class("disconnected")
             self.conn_dot.add_css_class("connected")
-            self.conn_label.set_label(f"Connected via {info.connection_type.title()}")
+            self.conn_label.set_label(
+                f"Connected via {transport_display}" +
+                (" — charging" if info.battery_charging else "")
+            )
 
             # Update stats
             self.battery_card.value_label.set_label(str(info.battery_level))
             self.dpi_card.value_label.set_label(str(dpi) if dpi else "--")
-            self.conn_card.value_label.set_label(info.connection_type.title())
+            self.conn_card.value_label.set_label(transport_display)
+            self.conn_card.unit_label.set_label(transport_unit)
             self.firmware_card.value_label.set_label(info.firmware_version)
+
+            # Battery card styling when low / charging
+            self.battery_card.remove_css_class("battery-low")
+            self.battery_card.remove_css_class("battery-charging")
+            if info.battery_charging:
+                self.battery_card.add_css_class("battery-charging")
+                self.battery_card.unit_label.set_label("charging")
+            elif info.battery_level <= 20:
+                self.battery_card.add_css_class("battery-low")
+                self.battery_card.unit_label.set_label("low!")
+            else:
+                self.battery_card.unit_label.set_label("%")
 
             # Update info bar
             if hasattr(self, 'info_serial'):
                 self.info_serial.set_label(info.serial or "N/A")
+
+            # Easy-Switch host list
+            self._render_hosts(hosts)
         else:
             # Disconnected state
             self.conn_dot.remove_css_class("connected")
@@ -602,8 +668,127 @@ class OverviewPage(Gtk.Box):
             self.conn_label.set_label("Disconnected")
 
             self.battery_card.value_label.set_label("--")
+            self.battery_card.unit_label.set_label("%")
+            self.battery_card.remove_css_class("battery-low")
+            self.battery_card.remove_css_class("battery-charging")
             self.dpi_card.value_label.set_label("--")
             self.conn_card.value_label.set_label("--")
+            self.conn_card.unit_label.set_label("")
             self.firmware_card.value_label.set_label("--")
 
+            self._render_hosts(None)
+
         return False  # Don't repeat GLib.idle_add
+
+    def _render_hosts(self, hosts):
+        """Render Easy-Switch host buttons from a hosts_info dict."""
+        # Clear existing children
+        for btn in self._host_buttons:
+            self.hosts_card.remove(btn)
+        self._host_buttons.clear()
+
+        if not hosts or not hosts.get("hosts"):
+            self.hosts_section.set_visible(False)
+            self.hosts_card.set_visible(False)
+            return
+
+        self.hosts_section.set_visible(True)
+        self.hosts_card.set_visible(True)
+
+        current = hosts.get("current_host", -1)
+        for entry in hosts["hosts"]:
+            if entry is None:
+                continue
+            idx = entry["index"]
+            paired = entry["paired"]
+            name = entry.get("name") or ("Empty" if not paired else f"Host {idx + 1}")
+
+            btn = Gtk.Button()
+            btn.set_hexpand(True)
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            box.set_margin_top(8)
+            box.set_margin_bottom(8)
+            btn.set_child(box)
+
+            num_lbl = Gtk.Label(label=f"{idx + 1}")
+            num_lbl.add_css_class("value-label")
+            box.append(num_lbl)
+
+            name_lbl = Gtk.Label(label=name)
+            name_lbl.add_css_class("card-description")
+            name_lbl.set_ellipsize(3)  # Pango.EllipsizeMode.END
+            name_lbl.set_max_width_chars(14)
+            box.append(name_lbl)
+
+            is_current = idx == current
+            if is_current:
+                btn.add_css_class("copper-button")
+                btn.set_tooltip_text(f"Currently active host")
+            elif paired:
+                btn.add_css_class("ghost-button")
+                btn.set_tooltip_text(f"Switch to {name}")
+                btn.connect("clicked", self._on_host_clicked, idx)
+            else:
+                btn.add_css_class("ghost-button")
+                btn.set_sensitive(False)
+                btn.set_tooltip_text("Host slot not paired")
+
+            self.hosts_card.append(btn)
+            self._host_buttons.append(btn)
+
+    def _on_host_clicked(self, button, host_index: int):
+        """Switch the mouse to a different paired host."""
+        import threading
+        if not self.device:
+            return
+
+        def do_switch():
+            ok = False
+            try:
+                ok = self.device.switch_to_host(host_index)
+            except Exception:
+                pass
+            if ok:
+                GLib.idle_add(
+                    lambda: self.window.show_toast(
+                        f"Switching to host {host_index + 1} — reconnect this machine when you switch back",
+                        timeout=5,
+                    )
+                )
+
+        threading.Thread(target=do_switch, daemon=True).start()
+
+    @staticmethod
+    def _format_transport(info) -> tuple[str, str]:
+        """Return (display_name, unit_label) for a DeviceInfo's connection type."""
+        ct = (info.connection_type or "").lower()
+        if ct == "bolt":
+            label = "Bolt"
+            unit = "charging" if info.battery_charging else "receiver"
+        elif ct in ("bluetooth", "bt"):
+            label = "Bluetooth"
+            unit = "charging" if info.battery_charging else "wireless"
+        else:
+            label = info.connection_type.title() if info.connection_type else "Unknown"
+            unit = "charging" if info.battery_charging else ""
+        return label, unit
+
+    def set_compact_layout(self, compact: bool):
+        """Switch between side-by-side and stacked layouts at the medium
+        breakpoint so nothing clips when the window is narrow.
+        """
+        if compact == self._compact:
+            return
+        self._compact = compact
+
+        if compact:
+            self._content_box.set_orientation(Gtk.Orientation.VERTICAL)
+            self._content_box.set_spacing(16)
+            # Stats grid goes full-width underneath the device card
+            self._left_box.set_hexpand(True)
+            self._right_box.set_hexpand(True)
+            self.mouse_preview.set_size_request(200, 280)
+        else:
+            self._content_box.set_orientation(Gtk.Orientation.HORIZONTAL)
+            self._content_box.set_spacing(24)
+            self.mouse_preview.set_size_request(220, 320)

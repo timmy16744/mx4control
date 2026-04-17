@@ -414,17 +414,46 @@ class PointerPage(Gtk.Box):
             logging.getLogger(__name__).error(f"Failed to save config: {e}")
 
     def update_device(self, device):
-        """Update page with new device connection"""
+        """Update page with new device connection.
+
+        Pulls the actual DPI from the device (live probe confirms
+        ADJUSTABLE_DPI function 0x01 returns the true current value on
+        MX Master 4 firmware 4.5+). Falls back to saved config if the
+        query fails.
+        """
         self.device = device
 
-        if device:
-            # Load DPI from saved config (not from device, which is unreliable)
+        if not device:
+            return
+
+        import threading
+
+        def fetch_and_apply():
+            device_dpi = None
             try:
-                config = self.window.config_manager.config
-                saved_dpi = config.pointer.dpi
-                self.dpi_slider.set_value(saved_dpi)
-                self.sensitivity_preview.set_dpi(saved_dpi)
+                device_dpi = device.get_dpi()
             except Exception:
-                # Fallback to default
-                self.dpi_slider.set_value(1000)
-                self.sensitivity_preview.set_dpi(1000)
+                pass
+
+            saved_dpi = 1000
+            try:
+                saved_dpi = self.window.config_manager.config.pointer.dpi
+            except Exception:
+                pass
+
+            dpi = device_dpi if (device_dpi and 200 <= device_dpi <= 8000) else saved_dpi
+            GLib.idle_add(self._apply_dpi_value, dpi)
+
+        threading.Thread(target=fetch_and_apply, daemon=True).start()
+
+    def _apply_dpi_value(self, dpi: int):
+        """Update DPI slider and preview without re-firing the on-change handler."""
+        self.dpi_slider.set_value(dpi)
+        self.sensitivity_preview.set_dpi(dpi)
+        # Persist whatever came from the device into config so restart matches
+        try:
+            self.window.config_manager.config.pointer.dpi = dpi
+            self.window.config_manager.save()
+        except Exception:
+            pass
+        return False

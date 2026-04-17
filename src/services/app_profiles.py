@@ -215,6 +215,11 @@ APP_CATEGORIES = {
 class AppProfileManager:
     """Manages application profiles and focused window detection"""
 
+    # Cache focused-app lookups so rapid-fire gestures don't pay the
+    # hyprctl subprocess cost every time. 500ms is short enough that
+    # switching windows between gestures still picks up the new profile.
+    _FOCUS_CACHE_TTL = 0.5
+
     def __init__(self, config_dir: Optional[Path] = None):
         self.config_dir = config_dir or Path.home() / '.config' / 'mx4control' / 'profiles'
         self.config_dir.mkdir(parents=True, exist_ok=True)
@@ -222,6 +227,10 @@ class AppProfileManager:
         self.profiles: Dict[str, AppProfile] = {}
         self.installed_apps: Dict[str, InstalledApp] = {}
         self.current_app_id: str = 'default'
+
+        # TTL cache state for get_focused_app_id
+        self._focus_cache_value: str = 'default'
+        self._focus_cache_time: float = 0.0
 
         # Load existing profiles
         self._load_profiles()
@@ -332,7 +341,16 @@ class AppProfileManager:
         )
 
     def get_focused_app_id(self) -> str:
-        """Get the app ID of the currently focused window"""
+        """Get the app ID of the currently focused window.
+
+        Results are cached for :attr:`_FOCUS_CACHE_TTL` seconds so a burst
+        of gestures within the same window skips the subprocess fork.
+        """
+        import time
+        now = time.monotonic()
+        if now - self._focus_cache_time < self._FOCUS_CACHE_TTL:
+            return self._focus_cache_value
+
         try:
             # Try hyprctl for Hyprland
             result = subprocess.run(
@@ -344,7 +362,10 @@ class AppProfileManager:
                 data = json.loads(result.stdout)
                 app_class = data.get('class', '').lower()
                 if app_class:
-                    return self._normalize_app_id(app_class)
+                    result_id = self._normalize_app_id(app_class)
+                    self._focus_cache_value = result_id
+                    self._focus_cache_time = now
+                    return result_id
         except Exception:
             pass
 
@@ -359,7 +380,10 @@ class AppProfileManager:
                 data = json.loads(result.stdout)
                 focused = self._find_focused_sway(data)
                 if focused:
-                    return self._normalize_app_id(focused)
+                    result_id = self._normalize_app_id(focused)
+                    self._focus_cache_value = result_id
+                    self._focus_cache_time = now
+                    return result_id
         except Exception:
             pass
 
@@ -370,10 +394,15 @@ class AppProfileManager:
                 capture_output=True, text=True, timeout=1
             )
             if result.returncode == 0:
-                return self._normalize_app_id(result.stdout.strip())
+                result_id = self._normalize_app_id(result.stdout.strip())
+                self._focus_cache_value = result_id
+                self._focus_cache_time = now
+                return result_id
         except Exception:
             pass
 
+        self._focus_cache_value = 'default'
+        self._focus_cache_time = now
         return 'default'
 
     def _find_focused_sway(self, node: dict) -> Optional[str]:

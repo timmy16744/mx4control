@@ -81,11 +81,28 @@ class GestureService:
         """Create the overlay window (called on main thread)"""
         self._overlay = ActionsRingOverlay()
 
+        # Haptic tick whenever the highlighted segment changes — gives the
+        # ring a tactile feel under the thumb instead of visual-only feedback.
+        self._overlay.on_segment_change = self._on_segment_change
+
         # Load configuration if available
         if self._config:
             self._overlay.load_from_config(self._config)
 
         return False  # Don't repeat
+
+    def _on_segment_change(self, new_index):
+        """Fire a light haptic tick each time the user crosses a ring segment.
+
+        Uses pattern 1 (Light Click) — subtle enough to be pleasant
+        during a sweep but noticeable as discrete ticks.
+        """
+        if not self._haptic_on_select or not self.on_haptic_trigger:
+            return
+        try:
+            self.on_haptic_trigger(1)  # Light click
+        except Exception as e:
+            logger.debug(f"segment-change haptic failed: {e}")
 
     def set_hidpp_device(self, device):
         """
@@ -101,7 +118,7 @@ class GestureService:
         self._hidpp_device = device
         if self._detector:
             self._detector.set_hidpp_device(device)
-            print(f">>> HID++ device set for gesture service: {device}")
+            logger.debug(f"HID++ device set for gesture service")
 
     def start(self) -> bool:
         """Start the gesture service"""
@@ -115,9 +132,9 @@ class GestureService:
         # Pass HID++ device to detector if available
         if self._hidpp_device:
             self._detector.set_hidpp_device(self._hidpp_device)
-            print(">>> Starting gesture service with HID++ button diversion")
+            logger.info("Starting gesture service with HID++ button diversion")
         else:
-            print(">>> WARNING: Starting gesture service WITHOUT HID++ - button presses may affect OS")
+            logger.warning("Starting gesture service WITHOUT HID++ - button presses may affect OS")
 
         if self._detector.start():
             self._running = True
@@ -168,7 +185,7 @@ class GestureService:
         # Get profile for currently focused app
         profile_manager = get_profile_manager()
         profile = profile_manager.get_current_profile()
-        print(f">>> GESTURE STARTED - App: {profile.app_name} ({profile.app_id})")
+        logger.debug(f"Gesture started for app: {profile.app_name} ({profile.app_id})")
 
         # Update overlay with app-specific actions on main thread
         GLib.idle_add(lambda: self._show_overlay_with_profile(profile))
@@ -195,10 +212,10 @@ class GestureService:
         """Show the overlay with app-specific profile (called on main thread)"""
         try:
             if not self._overlay:
-                print(">>> ERROR: No overlay object!")
+                logger.error("No overlay object available")
                 return False
 
-            print(f">>> Showing overlay for profile: {profile.app_name} with {len(profile.slices)} slices")
+            logger.debug(f"Showing overlay for profile: {profile.app_name} with {len(profile.slices)} slices")
 
             # Convert profile slices to RingSegments
             segments = []
@@ -217,21 +234,16 @@ class GestureService:
             # Update and show overlay
             self._overlay.set_segments(segments)
             self._overlay.show_overlay()
-            print(">>> Overlay show_overlay() called")
         except Exception as e:
-            print(f">>> ERROR in _show_overlay_with_profile: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Error in _show_overlay_with_profile: {e}")
         return False  # Don't repeat
 
     def _show_overlay(self):
         """Show the overlay window (called on main thread)"""
-        print(f">>> _show_overlay called, overlay={self._overlay}")  # Debug
         if self._overlay:
-            print(">>> Calling overlay.show_overlay()")
             self._overlay.show_overlay()
         else:
-            print(">>> ERROR: No overlay object!")
+            logger.error("No overlay object available")
         return False  # Don't repeat
 
     def _hide_overlay(self):
@@ -257,31 +269,26 @@ class GestureService:
 
         if segment is None:
             # Cancel zone - no action
-            print(">>> Gesture cancelled (center zone)")
-            logger.info("Gesture cancelled")
+            logger.info("Gesture cancelled (center zone)")
             return False
 
         if segment.action_data and segment.action_type != "disabled":
-            print(f">>> Executing: {segment.label} -> {segment.action_type}: {segment.action_data}")
             logger.info(f"Executing action: {segment.label} ({segment.action_type}: {segment.action_data})")
 
-            # Trigger haptic feedback if enabled
+            # Medium-click confirmation haptic on action execute
             if self._haptic_on_select and self.on_haptic_trigger:
                 try:
-                    self.on_haptic_trigger(2)  # Medium click pattern
+                    self.on_haptic_trigger(2)
                 except Exception as e:
                     logger.debug(f"Haptic trigger failed: {e}")
 
-            # Small delay to allow focus to return to the original window
-            # This is critical for wtype to send keystrokes to the right window
-            import time
-            time.sleep(0.05)  # 50ms delay
-
-            # Execute the action
+            # No artificial delay: with HID++ diversion the focused window
+            # never lost focus, and the layer-shell overlay never takes it
+            # either (KeyboardMode.NONE). wtype can fire immediately.
             result = execute_action(segment.action_type, segment.action_data)
-            print(f">>> Action result: {result}")
+            logger.debug(f"Action result: {result}")
         else:
-            print(f">>> No action for segment: {segment.label}")
+            logger.debug(f"No action for segment: {segment.label}")
 
         return False  # Don't repeat
 
@@ -298,15 +305,19 @@ class GestureService:
         return None
 
 
-# Global service instance
+# Global service instance with thread-safe initialization
 _service: Optional[GestureService] = None
+_service_lock = threading.Lock()
 
 
 def get_gesture_service() -> GestureService:
-    """Get or create the global gesture service"""
+    """Get or create the global gesture service (thread-safe)"""
     global _service
     if _service is None:
-        _service = GestureService()
+        with _service_lock:
+            # Double-check after acquiring lock
+            if _service is None:
+                _service = GestureService()
     return _service
 
 

@@ -43,24 +43,42 @@ class MX4ControlWindow(Adw.ApplicationWindow):
     └────────────┴──────────────────────────────────┘
     """
 
+    # How often to retry the device connection while disconnected.
+    _RECONNECT_INTERVAL_MS = 3000
+    # How often to poll the device for basic info to detect a dropped link.
+    _HEALTH_CHECK_INTERVAL_MS = 10000
+    # Declare the device dead only after this many consecutive health
+    # probe failures. One transient HID++ timeout shouldn't disconnect.
+    _HEALTH_CHECK_FAILURE_THRESHOLD = 3
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
         self.device = None
         self._pages = {}
         self._gesture_service = None
+        self._connecting = False
+        self._reconnect_source_id = None
+        self._health_source_id = None
+        self._health_failures = 0  # consecutive failed probes
+        self._last_connection_type = None
+        self._last_charging_state = None
 
         # Get config manager from application
         self.config_manager = self.get_application().config_manager
 
-        # Window setup
+        # Window setup — start wide but let Adw.Breakpoint collapse us below
+        # 700px and stack panes vertically on the overview below 1050px.
         self.set_title("MX4Control")
         self.set_default_size(1200, 800)
-        self.set_size_request(900, 600)
+        self.set_size_request(380, 520)
         self.add_css_class("main-window")
 
         # Build UI
         self._build_ui()
+
+        # Responsive layout via Adw breakpoints
+        self._setup_breakpoints()
 
         # Initialize gesture service
         self._init_gesture_service()
@@ -74,17 +92,14 @@ class MX4ControlWindow(Adw.ApplicationWindow):
     def _init_gesture_service(self):
         """Initialize the gesture service for Actions Ring"""
         try:
-            print(">>> Initializing gesture service...")
             self._gesture_service = get_gesture_service()
             result = self._gesture_service.initialize(self.config_manager.config)
-            print(f">>> Gesture service initialized: {result}")
 
             # Connect haptic callback to device
             self._gesture_service.on_haptic_trigger = self._trigger_haptic_from_gesture
 
-            logger.info("Gesture service initialized")
+            logger.info(f"Gesture service initialized: {result}")
         except Exception as e:
-            print(f">>> ERROR initializing gesture service: {e}")
             logger.error(f"Failed to initialize gesture service: {e}")
             self._gesture_service = None
 
@@ -98,11 +113,12 @@ class MX4ControlWindow(Adw.ApplicationWindow):
 
     def _on_close_request(self, window):
         """Handle window close"""
-        # Stop gesture service
+        self._cancel_reconnect()
+        self._cancel_health_check()
+
         if self._gesture_service:
             self._gesture_service.stop()
 
-        # Close device connection
         if self.device:
             try:
                 self.device.close()
@@ -112,20 +128,32 @@ class MX4ControlWindow(Adw.ApplicationWindow):
         return False  # Allow close to proceed
 
     def _build_ui(self):
-        """Construct the window UI"""
-        # Main layout container
-        self.main_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        self.set_content(self.main_box)
+        """Construct the window UI using Adw.OverlaySplitView for a
+        collapsible sidebar that switches to an overlay drawer on narrow
+        widths (Adw.Breakpoint drives the ``collapsed`` property).
+        """
+        # Toast overlay wraps everything for notifications
+        self.toast_overlay = Adw.ToastOverlay()
+        self.set_content(self.toast_overlay)
 
-        # Navigation sidebar
-        self._build_sidebar()
+        # Responsive split: sidebar on wide, overlay drawer on narrow
+        self.split_view = Adw.OverlaySplitView()
+        self.split_view.set_sidebar_width_fraction(0.22)
+        self.split_view.set_min_sidebar_width(240)
+        self.split_view.set_max_sidebar_width(320)
+        self.split_view.set_show_sidebar(True)
+        self.toast_overlay.set_child(self.split_view)
 
-        # Content area with header and stack
+        # Navigation sidebar (populates self.nav_list, self.status_dot, …)
+        sidebar_widget = self._build_sidebar()
+        self.split_view.set_sidebar(sidebar_widget)
+
+        # Content area with header and page stack
         content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
         content_box.add_css_class("main-content")
-        self.main_box.append(content_box)
+        self.split_view.set_content(content_box)
 
-        # Header bar
+        # Header bar — gains a sidebar-toggle button when collapsed
         self.header_bar = self._build_header()
         content_box.append(self.header_bar)
 
@@ -133,17 +161,87 @@ class MX4ControlWindow(Adw.ApplicationWindow):
         self.stack = Gtk.Stack()
         self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
         self.stack.set_transition_duration(200)
+        self.stack.set_vexpand(True)
         content_box.append(self.stack)
 
         # Create pages
         self._create_pages()
 
+    def _setup_breakpoints(self):
+        """Install Adw.Breakpoint instances so the layout adapts on resize.
+
+        - Below 720px wide: sidebar collapses into an overlay drawer and
+          the toggle button in the header becomes visible.
+        - Below 1050px wide: the overview page stacks its preview and
+          stats vertically (handled in OverviewPage._on_breakpoint).
+        """
+        # Narrow breakpoint — collapse sidebar into an overlay drawer
+        narrow = Adw.Breakpoint.new(
+            Adw.BreakpointCondition.parse("max-width: 820sp")
+        )
+        narrow.add_setter(self.split_view, "collapsed", True)
+        narrow.add_setter(self.sidebar_toggle, "visible", True)
+        narrow.connect("apply", lambda _b: self._on_narrow(True))
+        narrow.connect("unapply", lambda _b: self._on_narrow(False))
+        self.add_breakpoint(narrow)
+
+        # Medium breakpoint — stack overview panes vertically. Set high
+        # enough that the overview's horizontal layout never fights the
+        # window size; anything below ~1300px wide goes to stacked.
+        medium = Adw.Breakpoint.new(
+            Adw.BreakpointCondition.parse("max-width: 1300sp")
+        )
+        medium.connect("apply", lambda _b: self._notify_pages_compact(True))
+        medium.connect("unapply", lambda _b: self._notify_pages_compact(False))
+        self.add_breakpoint(medium)
+
+    def _on_narrow(self, narrow: bool):
+        """Sidebar is now collapsed (narrow=True) or docked (narrow=False)."""
+        if not narrow:
+            # Leaving narrow mode: make sure sidebar is shown
+            self.split_view.set_show_sidebar(True)
+
+    def _notify_pages_compact(self, compact: bool):
+        """Inform pages that we've crossed the 'compact' breakpoint."""
+        for page in self._pages.values():
+            if hasattr(page, "set_compact_layout"):
+                try:
+                    page.set_compact_layout(compact)
+                except Exception as e:
+                    logger.debug(f"page compact-layout switch failed: {e}")
+
+    def show_toast(self, message: str, timeout: int = 3):
+        """
+        Show a toast notification to the user.
+
+        Args:
+            message: The message to display
+            timeout: Duration in seconds (default 3)
+        """
+        toast = Adw.Toast.new(message)
+        toast.set_timeout(timeout)
+        self.toast_overlay.add_toast(toast)
+
+    def show_error(self, message: str, timeout: int = 5):
+        """
+        Show an error toast notification.
+
+        Args:
+            message: The error message to display
+            timeout: Duration in seconds (default 5)
+        """
+        toast = Adw.Toast.new(f"Error: {message}")
+        toast.set_timeout(timeout)
+        # Add a button to dismiss
+        toast.set_button_label("Dismiss")
+        self.toast_overlay.add_toast(toast)
+
     def _build_sidebar(self):
-        """Build the navigation sidebar"""
+        """Build the navigation sidebar. Returns the sidebar widget so the
+        caller can embed it in an Adw.OverlaySplitView.
+        """
         sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        sidebar.set_size_request(240, -1)
         sidebar.add_css_class("navigation-sidebar")
-        self.main_box.append(sidebar)
 
         # Logo/Title area
         title_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -203,6 +301,8 @@ class MX4ControlWindow(Adw.ApplicationWindow):
         # Device status at bottom
         self.device_status = self._create_device_status()
         sidebar.append(self.device_status)
+
+        return sidebar
 
     def _create_nav_row(self, page_id: str, icon_name: str,
                         title: str, subtitle: str) -> Gtk.ListBoxRow:
@@ -278,6 +378,16 @@ class MX4ControlWindow(Adw.ApplicationWindow):
         header.set_show_start_title_buttons(True)
         header.set_show_end_title_buttons(True)
 
+        # Sidebar toggle — hidden by default, shown when the breakpoint
+        # collapses the split view at narrow widths.
+        self.sidebar_toggle = Gtk.ToggleButton()
+        self.sidebar_toggle.set_icon_name("sidebar-show-symbolic")
+        self.sidebar_toggle.add_css_class("flat")
+        self.sidebar_toggle.set_tooltip_text("Toggle sidebar")
+        self.sidebar_toggle.set_visible(False)
+        self.sidebar_toggle.connect("toggled", self._on_sidebar_toggle)
+        header.pack_start(self.sidebar_toggle)
+
         # Window title
         self.page_title = Gtk.Label(label="Device")
         self.page_title.add_css_class("page-title")
@@ -350,22 +460,46 @@ class MX4ControlWindow(Adw.ApplicationWindow):
                 }
                 self.page_title.set_label(titles.get(page_id, ""))
 
+    def _on_sidebar_toggle(self, button):
+        """Sync the overlay sidebar to the toggle state."""
+        self.split_view.set_show_sidebar(button.get_active())
+
     def _on_refresh_clicked(self, button):
         """Handle refresh button click"""
-        self._connect_device()
+        self._connect_device(force=True)
 
-    def _connect_device(self):
-        """Attempt to connect to MX Master 4 (async)"""
+    def _connect_device(self, force: bool = False):
+        """Attempt to connect to MX Master 4 (async).
+
+        Safe to call repeatedly — guarded by ``self._connecting`` so the
+        reconnect loop can fire without stacking up threads. Set
+        ``force=True`` when the user explicitly requests a reconnect
+        (refresh button), to tear down any existing device handle first.
+        """
         import threading
 
-        # Update status
+        if self._connecting:
+            return
+        self._connecting = True
+
+        # Tear down the previous handle if the caller asked us to or if
+        # the link was lost (health check detected a dead fd).
+        if force and self.device is not None:
+            try:
+                if self._gesture_service and self._gesture_service.is_running:
+                    self._gesture_service.stop()
+                self.device.close()
+            except Exception:
+                pass
+            self.device = None
+
+        # Update status to "searching"
         self.status_dot.remove_css_class("connected")
         self.status_dot.remove_css_class("disconnected")
         self.status_dot.add_css_class("searching")
         self.status_label.set_label("Searching...")
 
         def connect_thread():
-            """Run device connection in background thread"""
             device_info = find_mx_master_4()
             device = None
             info = None
@@ -382,109 +516,224 @@ class MX4ControlWindow(Adw.ApplicationWindow):
                     logger.error(f"Failed to open device: {e}")
                     device = None
 
-            # Update UI on main thread
             GLib.idle_add(self._on_device_connected, device, info)
 
-        # Start connection in background
-        thread = threading.Thread(target=connect_thread, daemon=True)
-        thread.start()
+        threading.Thread(target=connect_thread, daemon=True).start()
 
-    def _on_device_connected(self, device, info):
-        """Called on main thread when device connection completes"""
-        self.device = device
-
-        if device and info:
-            self.status_dot.remove_css_class("searching")
-            self.status_dot.add_css_class("connected")
-            self.status_label.set_label(info.name if info else "MX Master 4")
-
-            battery_text = f"{info.battery_level}%"
-            if info.battery_charging:
-                battery_text += " ⚡"
-            self.battery_label.set_label(battery_text)
-
-            # Apply saved settings from config
-            self._apply_saved_settings()
-
-            # Update all pages with device and config
-            for page in self._pages.values():
-                page.update_device(self.device)
-
-            # Start gesture service for Actions Ring
-            if self._gesture_service:
-                try:
-                    # Pass HID++ device for proper button diversion
-                    # This ensures the gesture button doesn't trigger OS events
-                    print(">>> Setting HID++ device for gesture service...")
-                    self._gesture_service.set_hidpp_device(self.device)
-
-                    if not self._gesture_service.is_running:
-                        print(">>> Starting gesture service...")
-                        if self._gesture_service.start():
-                            print(f">>> Gesture service STARTED, device: {self._gesture_service.device_name}")
-                            logger.info("Gesture service started for Actions Ring")
-                        else:
-                            print(">>> FAILED to start gesture service")
-                            logger.warning("Failed to start gesture service")
-                except Exception as e:
-                    print(f">>> ERROR starting gesture service: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    logger.error(f"Error starting gesture service: {e}")
-
-            logger.info("Connected to MX Master 4")
-        else:
-            # Not found or failed
-            self.device = None
-            self.status_dot.remove_css_class("searching")
-            self.status_dot.add_css_class("disconnected")
-            self.status_label.set_label("Not connected")
-            self.battery_label.set_label("Connect your MX Master 4")
-
-            # Stop gesture service
-            if self._gesture_service and self._gesture_service.is_running:
-                self._gesture_service.stop()
-
-            # Update pages with None device
-            for page in self._pages.values():
-                page.update_device(None)
-
-        return False  # Don't repeat
-
-    def _apply_saved_settings(self):
-        """Apply saved settings to the connected device"""
-        if not self.device:
+    def _schedule_reconnect(self):
+        """Start the periodic reconnect loop (idempotent)."""
+        if self._reconnect_source_id is not None:
             return
+        self._reconnect_source_id = GLib.timeout_add(
+            self._RECONNECT_INTERVAL_MS, self._reconnect_tick
+        )
+
+    def _cancel_reconnect(self):
+        if self._reconnect_source_id is not None:
+            GLib.source_remove(self._reconnect_source_id)
+            self._reconnect_source_id = None
+
+    def _reconnect_tick(self) -> bool:
+        """GLib timeout callback: retry connection while disconnected."""
+        if self.device is not None:
+            self._reconnect_source_id = None
+            return False
+        if not self._connecting:
+            self._connect_device()
+        return True  # keep firing until we succeed
+
+    def _schedule_health_check(self):
+        """Start the periodic health check that detects a dropped link."""
+        if self._health_source_id is not None:
+            return
+        self._health_source_id = GLib.timeout_add(
+            self._HEALTH_CHECK_INTERVAL_MS, self._health_tick
+        )
+
+    def _cancel_health_check(self):
+        if self._health_source_id is not None:
+            GLib.source_remove(self._health_source_id)
+            self._health_source_id = None
+
+    def _health_tick(self) -> bool:
+        """Ping the device; declare dead only after N consecutive failures.
+
+        A single failure is likely a transient HID++ timeout from the
+        notification-listener thread racing with the probe. Only flip
+        the UI to disconnected after the device has clearly gone away.
+        """
+        if self.device is None:
+            self._health_source_id = None
+            return False
 
         import threading
 
-        config = self.config_manager.config
-
-        def apply_settings():
+        def probe():
+            alive = False
             try:
-                # Apply DPI
-                if config.pointer.dpi:
-                    self.device.set_dpi(config.pointer.dpi)
-                    logger.info(f"Applied saved DPI: {config.pointer.dpi}")
+                alive = bool(self.device and self.device.ping())
+            except Exception:
+                alive = False
 
-                # Apply SmartShift settings
-                self.device.set_smartshift(
-                    config.scroll.smartshift_enabled,
-                    config.scroll.smartshift_threshold
+            # If the quick ping succeeded, refresh live info for the UI
+            # (battery level, charging state). This is the "maybe the
+            # user just plugged in USB-C" path.
+            fresh_info = None
+            if alive:
+                try:
+                    fresh_info = self.device.get_device_info()
+                except Exception:
+                    fresh_info = None
+
+            def apply():
+                if alive:
+                    self._health_failures = 0
+                    if fresh_info:
+                        self._refresh_connection_display(fresh_info)
+                    return False
+
+                self._health_failures += 1
+                logger.debug(
+                    f"Health probe failed ({self._health_failures}/"
+                    f"{self._HEALTH_CHECK_FAILURE_THRESHOLD})"
                 )
-                logger.info(f"Applied SmartShift: enabled={config.scroll.smartshift_enabled}, threshold={config.scroll.smartshift_threshold}")
 
-                # Apply hi-res scroll
-                self.device.set_hires_scroll(
-                    config.scroll.hires_enabled,
-                    config.scroll.invert_vertical
+                if self._health_failures < self._HEALTH_CHECK_FAILURE_THRESHOLD:
+                    return False  # keep probing; don't disrupt UI yet
+
+                logger.info("Device unresponsive after 3 probes — reconnecting")
+                try:
+                    if self._gesture_service and self._gesture_service.is_running:
+                        self._gesture_service.stop()
+                    if self.device:
+                        self.device.close()
+                except Exception:
+                    pass
+                self.device = None
+                self._health_failures = 0
+                self._cancel_health_check()
+                self._apply_disconnected_state("Link lost — retrying…")
+                self._schedule_reconnect()
+                return False
+
+            GLib.idle_add(apply)
+
+        threading.Thread(target=probe, daemon=True).start()
+        return True
+
+    def _on_device_connected(self, device, info):
+        """Called on main thread when the connect-thread finishes."""
+        self._connecting = False
+        self.device = device
+
+        if device and info:
+            self._cancel_reconnect()
+
+            # Refresh UI + pages + gesture service (all live in one place)
+            self._refresh_connection_display(info)
+
+            # Low-battery toast only when not already charging
+            if not info.battery_charging and info.battery_level <= 20:
+                self.show_toast(
+                    f"Battery low ({info.battery_level}%) — connect USB-C to charge",
+                    timeout=6,
                 )
 
-            except Exception as e:
-                logger.error(f"Failed to apply saved settings: {e}")
+            logger.info(f"Connected to {info.name} via {info.connection_type}")
+            self._schedule_health_check()
+        else:
+            self.device = None
+            self._apply_disconnected_state("Searching for MX Master 4…")
 
-        # Apply in background to not block UI
-        threading.Thread(target=apply_settings, daemon=True).start()
+            if self._gesture_service and self._gesture_service.is_running:
+                self._gesture_service.stop()
+
+            for page in self._pages.values():
+                try:
+                    page.update_device(None)
+                except Exception:
+                    pass
+
+            # Only surface a toast the first time we notice it's gone, to
+            # avoid spamming while the reconnect loop retries.
+            if self._last_connection_type is not None:
+                self.show_toast("Mouse disconnected — retrying", timeout=3)
+            self._last_connection_type = None
+            self._last_charging_state = None
+
+            self._schedule_reconnect()
+
+        return False  # Don't repeat
+
+    def _apply_disconnected_state(self, label: str):
+        """Put the sidebar status widget into the 'not-connected' visual state."""
+        self.status_dot.remove_css_class("connected")
+        self.status_dot.remove_css_class("searching")
+        self.status_dot.add_css_class("disconnected")
+        self.status_label.set_label("Not connected")
+        self.battery_label.set_label(label)
+
+    def _refresh_connection_display(self, info):
+        """Update sidebar + pages to match live device info.
+
+        Called on first connect and on every health-check tick. When the
+        charging state flips ('Bolt' ↔ 'Bolt — charging') or the
+        transport changes (Bolt ↔ Bluetooth), we update the badges so
+        the user always sees the live state without having to refresh.
+        """
+        # Sidebar status
+        self.status_dot.remove_css_class("disconnected")
+        self.status_dot.remove_css_class("searching")
+        self.status_dot.add_css_class("connected")
+        self.status_label.set_label(info.name or "MX Master 4")
+
+        battery_text = f"{info.battery_level}%"
+        if info.battery_charging:
+            battery_text += " ⚡ charging"
+        elif info.battery_level <= 20:
+            battery_text += " ⚠ low"
+        self.battery_label.set_label(battery_text)
+
+        # Detect transport / charging changes for toasts + page refresh
+        first_connect = self._last_connection_type is None
+        conn_changed = info.connection_type != self._last_connection_type
+        charging_changed = info.battery_charging != self._last_charging_state
+
+        if first_connect or conn_changed or charging_changed:
+            # Push the new device handle into every page (and into the
+            # gesture service if this is a fresh connect).
+            for page in self._pages.values():
+                try:
+                    page.update_device(self.device)
+                except Exception as e:
+                    logger.debug(f"page.update_device failed: {e}")
+
+            if first_connect and self._gesture_service:
+                try:
+                    self._gesture_service.set_hidpp_device(self.device)
+                    if not self._gesture_service.is_running:
+                        self._gesture_service.start()
+                        logger.info("Gesture service started")
+                except Exception as e:
+                    logger.error(f"Error starting gesture service: {e}")
+
+            if first_connect:
+                self.show_toast(
+                    f"Connected to {info.name} via {info.connection_type.title()}",
+                    timeout=2,
+                )
+            elif conn_changed:
+                self.show_toast(
+                    f"Now connected via {info.connection_type.title()}",
+                    timeout=2,
+                )
+            elif charging_changed and info.battery_charging:
+                self.show_toast("USB-C charging", timeout=2)
+            elif charging_changed:
+                self.show_toast("Charging cable removed", timeout=2)
+
+        self._last_connection_type = info.connection_type
+        self._last_charging_state = info.battery_charging
 
     def trigger_haptic(self, pattern):
         """Trigger a haptic pattern on the connected device"""

@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=MX4 Control
 Comment=Logitech MX Master 4 gesture control
-Exec=/home/timh/projects/mx4control/mx4control.sh
+Exec=/home/timh/Projects/mx4control/mx4control.sh
 Icon=input-mouse
 Terminal=false
 Type=Application

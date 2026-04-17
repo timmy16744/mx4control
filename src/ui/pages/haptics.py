@@ -363,14 +363,16 @@ class HapticsPage(Gtk.Box):
         for card in self.pattern_cards:
             card.set_selected(card.pattern_id == pattern_id)
 
+        # Save to config
+        self._save_to_config(selected_pattern=pattern_id)
+
         # Test the pattern
         self._trigger_pattern(pattern_id)
 
     def _on_trigger_changed(self, switch, pspec, setting_key):
         """Handle trigger setting change"""
         # Save to config
-        # TODO: Implement config saving
-        pass
+        self._save_to_config(**{setting_key: switch.get_active()})
 
     def _on_test_pattern(self, button):
         """Test the currently selected pattern"""
@@ -425,10 +427,22 @@ class HapticsPage(Gtk.Box):
         self.device = device
 
         if device:
-            # Load intensity from saved config
+            # Load settings from saved config
             try:
                 config = self.window.config_manager.config
+
+                # Load intensity
                 self.intensity_scale.set_value(config.haptics.intensity)
+
+                # Load selected pattern
+                pattern_id = config.haptics.selected_pattern
+                self.current_pattern = pattern_id
+                for card in self.pattern_cards:
+                    card.set_selected(card.pattern_id == pattern_id)
+
             except Exception:
-                # Fallback to default
+                # Fallback to defaults
                 self.intensity_scale.set_value(2)
+                self.current_pattern = 2
+                if self.pattern_cards:
+                    self.pattern_cards[2].set_selected(True)
