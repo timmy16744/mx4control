@@ -1,0 +1,11 @@
+# udev rules for MX Master 4 HID++ + evdev access
+# Install to /etc/udev/rules.d/42-mx4control.rules
+
+# Logitech hidraw nodes (Bolt receiver, direct Bluetooth, Unifying) — HID++ protocol
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="046d", MODE="0660", GROUP="input", TAG+="uaccess"
+
+# evdev input devices for Logitech mice (MX Master 4 needs this for movement grab)
+KERNEL=="event*", ATTRS{idVendor}=="046d", MODE="0660", GROUP="input", TAG+="uaccess"
+
+# MX Master 4 direct Bluetooth-paired device
+SUBSYSTEM=="input", ATTRS{name}=="*MX Master 4*", MODE="0660", GROUP="input", TAG+="uaccess"

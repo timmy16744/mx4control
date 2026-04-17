@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=MX4 Control
+Comment=Configure the Logitech MX Master 4 — Actions Ring, DPI, haptics
+Exec=mx4-settings
+Icon=input-mouse
+Terminal=false
+Categories=Settings;HardwareSettings;
+Keywords=logitech;mouse;gesture;mx;master;haptic;
+StartupNotify=false

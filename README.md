@@ -1,118 +1,97 @@
 # MX4 Control
 
-Gesture control application for the Logitech MX Master 4 mouse on Linux/Wayland.
+Linux/Wayland control suite for the **Logitech MX Master 4** mouse —
+Actions Ring, haptic feedback, DPI, SmartShift, Easy-Switch hosts, and
+thumb-wheel diversion. Built around a long-running daemon that owns
+the HID++ connection, with a GTK4 settings GUI, a CLI, and first-class
+hooks for Waybar / AGS popups.
 
-## Features
+## Why this exists
 
-- **Gesture Ring**: Hold the gesture button and move in any direction to trigger actions
-- **Per-Application Profiles**: Different actions for different apps (browser, editor, terminal, etc.)
-- **8-Segment Action Ring**: Visual overlay showing available actions
-- **Wayland Native**: Uses wtype for keystroke injection, gtk4-layer-shell for overlays
+Logitech's own Logi Options+ doesn't ship for Linux, and Solaar — while
+excellent for most things — doesn't implement the **Actions Ring**: the
+radial menu you get when you hold the thumb button and flick.
 
-## Requirements
+This project contributes the Actions Ring plus the few MX Master 4
+specifics that Solaar hasn't caught up on yet.
 
-- Linux with Wayland (Hyprland, Sway, etc.)
-- Python 3.10+
-- GTK4 with libadwaita
-- gtk4-layer-shell
-- Logitech MX Master 4 mouse
+## Architecture
 
-### Dependencies (Arch Linux)
-
-```bash
-sudo pacman -S python gtk4 libadwaita python-gobject wtype
-yay -S gtk4-layer-shell  # or paru
+```
+   ┌───────────────────────┐
+   │ mx4d (daemon)         │   Owns /dev/hidraw3 exclusively.
+   │ ─────────────────────│    Single HID++ reader, sw_id-routed
+   │ HID++ dispatcher      │    responses, notification subscribers.
+   │ Gesture engine        │    Evdev grab for cursor freeze,
+   │ Actions Ring overlay  │    layer-shell overlay at cursor.
+   │ Hyprland watcher      │    Live focused-window events,
+   │ IPC: unix socket      │    no subprocess polling.
+   └─────────┬─────────────┘
+             │  JSON-RPC
+   ┌─────────┴───────────────────────────┐
+   │                                     │
+ ┌──▼──────────┐    ┌───────────────┐  ┌─▼───────────────┐
+ │ mx4ctl      │    │ mx4-settings  │  │ Waybar / AGS    │
+ │ CLI client  │    │ GTK4 GUI      │  │ popups          │
+ └─────────────┘    └───────────────┘  └─────────────────┘
 ```
 
-### Dependencies (Ubuntu/Debian)
-
-```bash
-sudo apt install python3 python3-gi gir1.2-gtk-4.0 libadwaita-1-0 gir1.2-adw-1 wtype
-# gtk4-layer-shell may need to be built from source
-```
-
-### Python Dependencies
-
-```bash
-pip install evdev
-```
+The daemon is the only process that opens `/dev/hidraw*` — so there's
+never any fd contention, no racy notification drops, and multiple
+clients can query state simultaneously.
 
 ## Installation
 
 ```bash
-git clone https://github.com/yourusername/mx4control.git
-cd mx4control
-chmod +x install.sh
 sudo ./install.sh
-```
-
-This will:
-- Install the application to `/opt/mx4control`
-- Create a launcher at `/usr/local/bin/mx4control`
-- Install udev rules for device access
-- Add a desktop entry
-
-## Manual Run (Development)
-
-```bash
-cd mx4control
-LD_PRELOAD=/usr/lib/libgtk4-layer-shell.so python -u src/main.py
+systemctl --user daemon-reload
+systemctl --user enable --now mx4d.service
+mx4ctl state
 ```
 
 ## Usage
 
-1. Launch `mx4control` from your application menu or terminal
-2. Press and hold the gesture button on your MX Master 4
-3. Move the mouse in a direction to highlight an action
-4. Release to execute the action, or return to center to cancel
-
-## Configuration
-
-Profiles and settings are stored in `~/.config/mx4control/`
-
-### Default Actions
-
-| Direction | Action |
-|-----------|--------|
-| Up | Undo (Ctrl+Z) |
-| Down | Redo (Ctrl+Y) |
-| Left | Paste (Ctrl+V) |
-| Right | Copy (Ctrl+C) |
-| Up-Left | Select All (Ctrl+A) |
-| Up-Right | Save (Ctrl+S) |
-| Down-Left | Cut (Ctrl+X) |
-| Down-Right | Find (Ctrl+F) |
-
-### Per-App Profiles
-
-The app automatically detects the focused application and can apply different action sets. Built-in templates exist for:
-- Browsers (tabs, navigation)
-- Editors (code actions)
-- Terminals (pane management)
-- Media players (playback control)
-- Graphics apps (layer/tool shortcuts)
-
-## Troubleshooting
-
-### "No evdev mouse device found"
-
-Ensure you're in the `input` group:
 ```bash
-sudo usermod -aG input $USER
-# Log out and back in
+mx4ctl state                     # JSON state (for scripting)
+mx4ctl dpi 1600                  # set pointer DPI
+mx4ctl smartshift on             # enable SmartShift
+mx4ctl haptic 2                  # play haptic pattern 2
+mx4ctl host 1                    # switch Easy-Switch host
+mx4ctl thumbwheel on             # divert thumb wheel for custom actions
+mx4-settings                     # open the GUI
 ```
 
-### Overlay not showing / layer-shell warnings
+## Reverse-engineering notes
 
-Make sure to run with LD_PRELOAD:
+Captured from firmware 4.5.0000 against a live MX Master 4 (Bolt):
+
+* **`MX_SMART_ACTIONS (0x9401)` is firmware-locked.** Every function
+  returns HID++ error 0x05 (Logitech internal). Cannot be unlocked via
+  `ENABLE_HIDDEN_FEATURES` — that's a real cryptographic gate. Client-
+  side simulation is the only path.
+* **`GESTURE_2 (0x19B0)` is enumerated but all 16 gesture slots are
+  disabled.** Can't offload gesture detection to firmware.
+* **Haptic `0x0B4E` is a hidden / direct-address feature** — not in
+  the enumerated feature list, but the device responds to writes with
+  a magic 2-byte address. Short-message format:
+  `10 DEV 0B 4E PATTERN 00 00`.
+* **`THUMBWHEEL (0x2150)` can be diverted** — native res 20, diverted
+  res 120, capabilities flag 0x03 (supports diversion + hi-res).
+* **`REPROG_CONTROLS_V4` getCidReporting** returns
+  `[cid(2), flags1, remap(2), flags2]` — the remap CID is at bytes
+  3–4, not 4–5 as the v1 implementation had it.
+
+The full probe (including every feature + response byte) is committed
+at `tests/fixtures/mx4_master4_4.5.0000.json` and drives the protocol
+regression tests.
+
+## Development
+
 ```bash
-LD_PRELOAD=/usr/lib/libgtk4-layer-shell.so mx4control
+pytest              # 21 tests (protocol, gesture math, config)
+ruff check src/     # lint
 ```
-
-### Gesture button deselects text
-
-This is a known limitation when HID++ diversion isn't working. The app grabs the device on button press to minimize this, but the initial press may still affect the OS.
 
 ## License
 
-MIT License
+MIT.

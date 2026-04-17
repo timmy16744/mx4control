@@ -1,97 +1,81 @@
 #!/bin/bash
-# MX4Control Installation Script
-set -e
+# Install mx4control — daemon + CLI + settings GUI
+#
+# Run with sudo for system-wide installation including udev rules,
+# without sudo for per-user installation under ~/.local.
+
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_NAME="mx4control"
 
-echo "=== MX4Control Installer ==="
-echo ""
-
-# Check if running as root for system-wide install
-if [ "$EUID" -eq 0 ]; then
-    echo "Installing system-wide..."
-    INSTALL_DIR="/opt/mx4control"
-    BIN_DIR="/usr/local/bin"
-    DESKTOP_DIR="/usr/share/applications"
-    UDEV_DIR="/etc/udev/rules.d"
+if [[ $EUID -eq 0 ]]; then
+    PREFIX="/usr/local"
+    SYSTEM_INSTALL=1
+    echo "=== Installing system-wide to $PREFIX ==="
 else
-    echo "Installing for current user..."
-    INSTALL_DIR="$HOME/.local/share/mx4control"
-    BIN_DIR="$HOME/.local/bin"
-    DESKTOP_DIR="$HOME/.local/share/applications"
-    UDEV_DIR=""
-
-    echo ""
-    echo "NOTE: udev rules require root. Run with sudo for full installation:"
-    echo "  sudo $0"
-    echo ""
+    PREFIX="$HOME/.local"
+    SYSTEM_INSTALL=0
+    echo "=== Installing per-user to $PREFIX ==="
+    echo "Run with sudo for udev rules; user install won't grant hidraw/evdev access."
 fi
 
-# Create directories
-mkdir -p "$INSTALL_DIR"
-mkdir -p "$BIN_DIR"
-mkdir -p "$DESKTOP_DIR"
+install_dir="$PREFIX/share/mx4control"
+bin_dir="$PREFIX/bin"
+desktop_dir="$PREFIX/share/applications"
 
-# Copy application files
-echo "Copying application files..."
-cp -r "$SCRIPT_DIR/src" "$INSTALL_DIR/"
-cp "$SCRIPT_DIR/mx4control.sh" "$INSTALL_DIR/"
+mkdir -p "$install_dir" "$bin_dir" "$desktop_dir"
 
-# Create launcher script
-echo "Creating launcher..."
-cat > "$BIN_DIR/mx4control" << EOF
+# Install the Python package
+rm -rf "$install_dir/src"
+cp -r "$SCRIPT_DIR/src" "$install_dir/"
+
+# Compile .pyc so runtime startup is fast
+/usr/bin/python3 -m compileall -q "$install_dir/src" || true
+
+# Three launchers: daemon, CLI, settings GUI
+for entry in mx4d:mx4.daemon.main mx4ctl:mx4.cli.main mx4-settings:mx4.ui.app; do
+    name="${entry%%:*}"
+    module="${entry##*:}"
+    cat > "$bin_dir/$name" <<LAUNCH
 #!/bin/bash
-cd "$INSTALL_DIR"
-exec env LD_PRELOAD=/usr/lib/libgtk4-layer-shell.so /usr/bin/python3 -u src/main.py "\$@"
-EOF
-chmod +x "$BIN_DIR/mx4control"
+export PYTHONPATH="$install_dir/src\${PYTHONPATH:+:\$PYTHONPATH}"
+exec env LD_PRELOAD="\${LD_PRELOAD:-/usr/lib/libgtk4-layer-shell.so}" \\
+    /usr/bin/python3 -m $module "\$@"
+LAUNCH
+    chmod +x "$bin_dir/$name"
+done
 
-# Install desktop file
-echo "Installing desktop entry..."
-cat > "$DESKTOP_DIR/io.github.mx4control.desktop" << EOF
-[Desktop Entry]
-Name=MX4 Control
-Comment=Logitech MX Master 4 gesture control
-Exec=$BIN_DIR/mx4control
-Icon=input-mouse
-Terminal=false
-Type=Application
-Categories=Settings;HardwareSettings;
-Keywords=logitech;mouse;gesture;mx;master;
-StartupNotify=false
-EOF
+# Desktop entry
+install -Dm644 "$SCRIPT_DIR/data/io.github.mx4control.desktop" "$desktop_dir/"
 
-# Install udev rules (requires root)
-if [ -n "$UDEV_DIR" ]; then
-    echo "Installing udev rules..."
-    cp "$SCRIPT_DIR/42-mx4control.rules" "$UDEV_DIR/"
+# systemd user unit
+if [[ $SYSTEM_INSTALL -eq 1 ]]; then
+    install -Dm644 "$SCRIPT_DIR/systemd/mx4d.service" \
+        /etc/systemd/user/mx4d.service
+    echo "Installed systemd user unit → enable per-user with:"
+    echo "  systemctl --user daemon-reload"
+    echo "  systemctl --user enable --now mx4d.service"
+
+    install -Dm644 "$SCRIPT_DIR/systemd/42-mx4control.rules" \
+        /etc/udev/rules.d/42-mx4control.rules
     udevadm control --reload-rules
     udevadm trigger
-    echo "udev rules installed and reloaded"
-fi
-
-# Add user to input group if not already
-if ! groups | grep -q '\binput\b'; then
-    if [ "$EUID" -eq 0 ]; then
-        ACTUAL_USER="${SUDO_USER:-$USER}"
-        usermod -aG input "$ACTUAL_USER"
-        echo "Added $ACTUAL_USER to 'input' group (re-login required)"
-    else
-        echo ""
-        echo "WARNING: You're not in the 'input' group. Run:"
-        echo "  sudo usermod -aG input $USER"
-        echo "Then log out and back in."
-    fi
-fi
-
-echo ""
-echo "=== Installation Complete ==="
-echo ""
-echo "Run with: mx4control"
-echo ""
-if [ "$EUID" -ne 0 ]; then
-    echo "For udev rules (required for evdev access), run:"
-    echo "  sudo cp $SCRIPT_DIR/42-mx4control.rules /etc/udev/rules.d/"
+    echo "udev rules installed and reloaded."
+else
+    user_unit_dir="$HOME/.config/systemd/user"
+    mkdir -p "$user_unit_dir"
+    # Swap the system path for the user-local bin in the unit
+    sed "s|/usr/local/bin/mx4d|$bin_dir/mx4d|" \
+        "$SCRIPT_DIR/systemd/mx4d.service" \
+        > "$user_unit_dir/mx4d.service"
+    echo "Installed user systemd unit → enable with:"
+    echo "  systemctl --user daemon-reload"
+    echo "  systemctl --user enable --now mx4d.service"
+    echo
+    echo "⚠  For hidraw/evdev access run once with sudo:"
+    echo "  sudo install -m644 $SCRIPT_DIR/systemd/42-mx4control.rules /etc/udev/rules.d/"
     echo "  sudo udevadm control --reload-rules && sudo udevadm trigger"
 fi
+
+echo
+echo "Done. Test with: mx4ctl ping"

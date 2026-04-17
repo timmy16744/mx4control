@@ -1,0 +1,25 @@
+[Unit]
+Description=MX Master 4 control daemon (Actions Ring + quick settings)
+Documentation=https://github.com/timmy16744/mx4control
+After=graphical-session-pre.target
+PartOf=graphical-session.target
+ConditionPathExists=/dev/input
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/mx4d
+Restart=on-failure
+RestartSec=3
+# Wayland + X11 access
+Environment=GDK_BACKEND=wayland,x11
+Environment=LD_PRELOAD=/usr/lib/libgtk4-layer-shell.so
+
+# Security hardening — daemon only needs hidraw + evdev + wtype/hyprctl
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.config/mx4control %t
+
+[Install]
+WantedBy=graphical-session.target
