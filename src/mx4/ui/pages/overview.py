@@ -40,8 +40,10 @@ class OverviewPage(Gtk.Box):
         hero.set_valign(Gtk.Align.FILL)
         self.append(hero)
 
-        # Left: big mouse preview
-        self.mouse_svg = MouseSVG(pixel_size=190)
+        # Left: big mouse preview. The vector matches the reference
+        # layout — thumb wheel, mode-shift, back, forward, gesture pad —
+        # and click hit-tests per CID.
+        self.mouse_svg = MouseSVG(pixel_size=260, show_label=False)
         self.mouse_svg.set_valign(Gtk.Align.CENTER)
         self.mouse_svg.connect("button-clicked", self._on_mouse_button_clicked)
         hero.append(self.mouse_svg)

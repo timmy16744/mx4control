@@ -46,19 +46,19 @@ _ACCENT_COPPER = (0.83, 0.65, 0.46)     # copper — shared with the rest of the
 
 
 # Normalised hit-test rects (x, y, w, h in viewBox coords) per CID.
-# Matches the SVG exactly so clicks land where the user sees the
-# buttons. Ordering matters: narrower buttons listed first so they win
-# hit-tests when they overlap a wider container (the thumb wheel sits
-# right on the edge of the chassis, for example).
+# Side layout, top to bottom:
+#   thumb wheel → SmartShift (new 3rd side button) → Back → Forward → gesture
+# pad. The MX Master 4 places SmartShift on the side, not behind the
+# wheel like older models.
 _VIEWBOX_W, _VIEWBOX_H = 400.0, 600.0
 
 _HIT_RECTS: list[tuple[int, str, tuple[float, float, float, float]]] = [
-    (ControlID.THUMB_WHEEL,    "Thumb wheel",  (80,  240,  8,  60)),
-    (ControlID.BACK,           "Back",         (120, 245, 24,  24)),
-    (ControlID.FORWARD,        "Forward",      (120, 275, 24,  24)),
-    (ControlID.GESTURE_BUTTON, "Gesture",      (105, 320, 50,  65)),
-    # Middle wheel click + SmartShift live inside the scroll-wheel housing
-    (ControlID.SMART_SHIFT,    "SmartShift",   (188, 213, 24,  18)),
+    (ControlID.THUMB_WHEEL,    "Thumb wheel",  (80,  218,  8,  44)),
+    (ControlID.SMART_SHIFT,    "Mode shift",   (120, 222, 28,  22)),
+    (ControlID.BACK,           "Back",         (120, 252, 28,  24)),
+    (ControlID.FORWARD,        "Forward",      (120, 282, 28,  24)),
+    (ControlID.GESTURE_BUTTON, "Gesture",      (102, 316, 58,  78)),
+    # Middle wheel click inside the scroll-wheel housing
     (ControlID.MIDDLE_CLICK,   "Wheel click",  (188, 150, 24,  60)),
     # Big main clicks last so they act as the fallback hit target
     (ControlID.LEFT_CLICK,     "Left click",   (110, 140, 65,  95)),
@@ -81,7 +81,7 @@ class MouseSVG(Gtk.DrawingArea):
         "button-clicked": (GObject.SignalFlags.RUN_FIRST, None, (int,)),
     }
 
-    def __init__(self, pixel_size: int = 220, *, show_label: bool = True):
+    def __init__(self, pixel_size: int = 260, *, show_label: bool = False):
         super().__init__()
         self._pressed: set[int] = set()
         self._remapped: set[int] = set()
@@ -91,8 +91,15 @@ class MouseSVG(Gtk.DrawingArea):
         self._label_sub = "Connected via Bolt"
         self._connected = True
 
-        # Maintain the reference aspect ratio (400×600).
-        height = int(pixel_size * _VIEWBOX_H / _VIEWBOX_W)
+        # When the label is hidden the widget only needs ~2/3 of the
+        # reference viewBox's height (the label footer is at y≈510).
+        if show_label:
+            effective_h = _VIEWBOX_H
+        else:
+            effective_h = 470
+        self._viewbox_h_effective = effective_h
+
+        height = int(pixel_size * effective_h / _VIEWBOX_W)
         self.set_size_request(pixel_size, height)
         self.set_draw_func(self._draw)
 
@@ -164,9 +171,10 @@ class MouseSVG(Gtk.DrawingArea):
     def _to_viewbox(self, x: float, y: float) -> tuple[float, float]:
         """Convert widget-pixel (x, y) into the SVG viewBox space."""
         w, h = self.get_width(), self.get_height()
-        scale = min(w / _VIEWBOX_W, h / _VIEWBOX_H)
+        vh = self._viewbox_h_effective
+        scale = min(w / _VIEWBOX_W, h / vh)
         dx = (w - _VIEWBOX_W * scale) / 2
-        dy = (h - _VIEWBOX_H * scale) / 2
+        dy = (h - vh * scale) / 2
         return (x - dx) / scale, (y - dy) / scale
 
     def _hit(self, x: float, y: float) -> Optional[int]:
@@ -198,20 +206,20 @@ class MouseSVG(Gtk.DrawingArea):
     # ─── drawing ────────────────────────────────────────────────────
 
     def _draw(self, _area, cr: cairo.Context, width: int, height: int) -> None:
-        scale = min(width / _VIEWBOX_W, height / _VIEWBOX_H)
+        vh = self._viewbox_h_effective
+        scale = min(width / _VIEWBOX_W, height / vh)
         cr.translate((width - _VIEWBOX_W * scale) / 2,
-                     (height - _VIEWBOX_H * scale) / 2)
+                     (height - vh * scale) / 2)
         cr.scale(scale, scale)
 
-        self._draw_card(cr)
+        self._draw_card(cr, vh)
         self._draw_pink_glow(cr)
         self._draw_chassis(cr)
         self._draw_scroll_housing(cr)
         self._draw_main_buttons(cr)
         self._draw_wheel(cr)
-        self._draw_smartshift(cr)
-        self._draw_thumb_wheel(cr)
         self._draw_side_buttons(cr)
+        self._draw_thumb_wheel(cr)
         self._draw_thumb_pad(cr)
         if self._show_label:
             self._draw_label(cr)
@@ -241,23 +249,23 @@ class MouseSVG(Gtk.DrawingArea):
         cr.curve_to(120, 150, 135, 140, 150, 130)
         cr.close_path()
 
-    def _draw_card(self, cr) -> None:
-        # Soft drop shadow under the whole card (viewBox extent)
+    def _draw_card(self, cr, vh: float) -> None:
+        # Soft drop shadow under the whole card
         cr.set_source_rgba(0, 0, 0, 0.45)
-        self._rounded_rect(cr, 8, 16, _VIEWBOX_W - 16, _VIEWBOX_H - 16, 24)
+        self._rounded_rect(cr, 8, 16, _VIEWBOX_W - 16, vh - 16, 24)
         cr.fill()
 
         # Card gradient
-        grad = cairo.LinearGradient(0, 0, 0, _VIEWBOX_H)
+        grad = cairo.LinearGradient(0, 0, 0, vh)
         grad.add_color_stop_rgb(0, *_BG_TOP)
         grad.add_color_stop_rgb(1, *_BG_BOT)
         cr.set_source(grad)
-        self._rounded_rect(cr, 0, 0, _VIEWBOX_W, _VIEWBOX_H, 24)
+        self._rounded_rect(cr, 0, 0, _VIEWBOX_W, vh, 24)
         cr.fill()
 
         # Card rim highlight
         cr.set_source_rgba(1, 1, 1, 0.04)
-        self._rounded_rect(cr, 0, 0, _VIEWBOX_W, _VIEWBOX_H, 24)
+        self._rounded_rect(cr, 0, 0, _VIEWBOX_W, vh, 24)
         cr.set_line_width(1)
         cr.stroke()
 
@@ -320,59 +328,77 @@ class MouseSVG(Gtk.DrawingArea):
             cr.line_to(208, y)
         cr.stroke()
 
-    def _draw_smartshift(self, cr) -> None:
-        cr.set_source_rgb(*_BUTTON)
-        self._rounded_rect(cr, 192, 215, 16, 12, 4)
-        cr.fill()
-        cr.set_source_rgba(1, 1, 1, 0.04)
-        cr.set_line_width(1)
-        self._rounded_rect(cr, 192, 215, 16, 12, 4)
-        cr.stroke()
-
     def _draw_thumb_wheel(self, cr) -> None:
+        # Horizontal scroll strip at the top of the side
         cr.set_source_rgb(*_BUTTON)
-        self._rounded_rect(cr, 80, 240, 8, 60, 4)
+        self._rounded_rect(cr, 80, 218, 8, 44, 4)
         cr.fill()
         cr.set_source_rgb(*_THUMB_DOT)
         cr.set_line_width(2)
-        for y in (255, 265, 275, 285):
+        for y in (226, 234, 242, 250, 258):
             cr.move_to(80, y)
             cr.line_to(88, y)
         cr.stroke()
 
     def _draw_side_buttons(self, cr) -> None:
-        # Back (top) and Forward (bottom)
-        for y, glyph_y, direction in ((245, 257, "back"), (275, 287, "forward")):
+        """Three stacked side buttons from top to bottom:
+
+        Mode Shift (under the thumb wheel) → Back → Forward. Each has a
+        subtle blue glyph on the sky-blue tint from the reference SVG.
+        """
+        buttons = [
+            # (y, glyph_kind)
+            (222, "mode"),      # SmartShift / Mode Shift (new 3rd side button)
+            (252, "back"),      # Back
+            (282, "forward"),   # Forward
+        ]
+        for y, kind in buttons:
             cr.set_source_rgb(*_BUTTON)
-            self._rounded_rect(cr, 120, y, 24, 24, 6)
+            self._rounded_rect(cr, 120, y, 28, 24, 6)
             cr.fill()
             cr.set_source_rgba(1, 1, 1, 0.04)
             cr.set_line_width(1)
-            self._rounded_rect(cr, 120, y, 24, 24, 6)
+            self._rounded_rect(cr, 120, y, 28, 24, 6)
             cr.stroke()
-            # Blue glyph — a simple horizontal bar like the reference SVG
-            cr.set_source_rgba(*_GLYPH_BLUE, 0.7)
-            cr.set_line_width(2)
+
+            cr.set_source_rgba(*_GLYPH_BLUE, 0.75)
+            cr.set_line_width(1.8)
             cr.set_line_cap(cairo.LineCap.ROUND)
-            cr.move_to(129, glyph_y)
-            cr.line_to(135, glyph_y)
+            cx, cy = 134, y + 12
+            if kind == "mode":
+                # Two short horizontal bars stacked — "mode shift" glyph
+                cr.move_to(cx - 5, cy - 3)
+                cr.line_to(cx + 5, cy - 3)
+                cr.move_to(cx - 5, cy + 3)
+                cr.line_to(cx + 5, cy + 3)
+            elif kind == "back":
+                # Left-pointing chevron
+                cr.move_to(cx + 3, cy - 4)
+                cr.line_to(cx - 3, cy)
+                cr.line_to(cx + 3, cy + 4)
+            elif kind == "forward":
+                # Right-pointing chevron
+                cr.move_to(cx - 3, cy - 4)
+                cr.line_to(cx + 3, cy)
+                cr.line_to(cx - 3, cy + 4)
             cr.stroke()
 
     def _draw_thumb_pad(self, cr) -> None:
+        # Larger thumb pad matching the updated hit rect (x=102 y=316 w=58 h=78)
         cr.set_source_rgb(*_THUMB_BG)
-        self._rounded_rect(cr, 105, 320, 50, 65, 10)
+        self._rounded_rect(cr, 102, 316, 58, 78, 10)
         cr.fill()
         cr.set_source_rgba(1, 1, 1, 0.02)
         cr.set_line_width(1)
-        self._rounded_rect(cr, 105, 320, 50, 65, 10)
+        self._rounded_rect(cr, 102, 316, 58, 78, 10)
         cr.stroke()
 
-        # Dot matrix
+        # Dot matrix — 4 columns × 5 rows
         cr.set_source_rgb(*_THUMB_DOT)
-        for row_y in (335, 350, 365, 380):
-            for col_x in (118, 130, 142):
+        for row_y in (330, 344, 358, 372, 386):
+            for col_x in (114, 126, 138, 150):
                 cr.new_sub_path()
-                cr.arc(col_x, row_y, 2.5, 0, 2 * math.pi)
+                cr.arc(col_x, row_y, 2.2, 0, 2 * math.pi)
         cr.fill()
 
     def _draw_label(self, cr) -> None:
