@@ -11,7 +11,7 @@
 [![Linux](https://img.shields.io/badge/Platform-Linux%20%7C%20Wayland-3ce0e8?style=flat-square&labelColor=0b0e14)](https://github.com/timmy16744/mx4control)
 [![HID++ 2.0](https://img.shields.io/badge/Protocol-HID%2B%2B%202.0-e8a864?style=flat-square&labelColor=0b0e14)](https://github.com/timmy16744/mx4control)
 [![License: MIT](https://img.shields.io/badge/License-MIT-a0aec0?style=flat-square&labelColor=0b0e14)](LICENSE)
-[![Donate](https://img.shields.io/badge/Donate-Buy%20my%201%20year%20old%20son%20nappies%20to%20say%20thanks-ff6b81?style=flat-square&labelColor=0b0e14&logo=paypal&logoColor=white)](https://www.paypal.com/qrcodes/p2pqrc/T4X8KXBNDDALL)
+[![Donate](https://img.shields.io/badge/Donate-Buy%20my%201%20year%20old%20son%20nappies%20to%20say%20thanks-ff6b81?style=flat-square&labelColor=0b0e14&logo=paypal&logoColor=white)](https://paypal.me/duck273)
 
 <br />
 
@@ -147,7 +147,7 @@ ruff check src/ tests/
 
 ### Support MX4 Studio
 
-If MX4 Studio saved you time or unlocked your mouse on Linux, you can **[buy my 1 year old son nappies to say thanks](https://www.paypal.com/qrcodes/p2pqrc/T4X8KXBNDDALL)**.
+If MX4 Studio saved you time or unlocked your mouse on Linux, you can **[buy my 1 year old son nappies to say thanks](https://paypal.me/duck273)**.
 
 <sub>MIT License — see <a href="LICENSE">LICENSE</a></sub>
 
