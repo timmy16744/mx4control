@@ -68,7 +68,12 @@ class FeatureID(IntEnum):
 
     # Input
     REPROG_CONTROLS_V4 = 0x1B04
-    GESTURE_2 = 0x19B0
+    # 0x19B0 is the HAPTIC feature on the MX Master 4 (haptic motor power /
+    # gesture-pad vibration) — NOT GESTURE_2 (which is 0x6501 and absent here).
+    # read = fn idx 1 (0x10): [enabled, level, flags]; write = fn idx 2 (0x20):
+    # [enable, level]; play waveform = fn idx 4 (0x40).
+    HAPTIC = 0x19B0
+    FORCE_SENSING_BUTTON = 0x19C0
 
     # Pointer & scroll
     SMART_SHIFT_ENHANCED = 0x2111
@@ -100,7 +105,8 @@ class ControlID(IntEnum):
     FORWARD = 0x0056
     GESTURE_BUTTON = 0x00C3
     SMART_SHIFT = 0x00C4
-    THUMB_WHEEL = 0x01A0
+    HAPTIC_THUMB_PAD = 0x01A0
+    THUMB_WHEEL = 0x01A0  # legacy alias (0x01A0 is physical Haptic Sense Thumb Pad!)
     VIRTUAL_GESTURE = 0x00D7
 
 
@@ -119,7 +125,13 @@ DIVERTABLE_CONTROLS = frozenset({
 # ───────────────────────────── Task IDs ──────────────────────────────────
 
 class TaskID(IntEnum):
-    """Logical actions that physical controls can be remapped to."""
+    """Logical actions that physical controls can be remapped to.
+
+    Default cid→task mappings captured from the live MX Master 4 probe
+    (firmware 4.5.0000): thumb-wheel (cid 0x01A0) → 0x0109, virtual-gesture
+    (cid 0x00D7) → 0x00B4. The latter two are MX-series tasks not present in
+    the generic HID++ 2.0 task list.
+    """
     LEFT_CLICK = 0x0038
     RIGHT_CLICK = 0x0039
     MIDDLE_CLICK = 0x003A
@@ -127,18 +139,37 @@ class TaskID(IntEnum):
     FORWARD = 0x003E
     GESTURE_BUTTON = 0x009C
     SMART_SHIFT = 0x009D
+    VIRTUAL_GESTURE = 0x00B4
+    THUMBWHEEL = 0x0109
     DISABLED = 0x0000
 
 
 # ───────────────────────────── Haptic patterns ───────────────────────────
 
 class HapticPattern(IntEnum):
-    """Indices into the MX Master 4's built-in haptic waveform bank (0–14).
+    """Indices into the MX Master 4's built-in HAPTIC (0x19B0) waveform bank.
 
-    Exposed via the ``MX_HAPTICS_DIRECT`` magic feature. Pattern 1 has the
-    crispest feel for segment-crossing ticks on the Actions Ring; pattern
-    2 is the default confirmation click; pattern 11 is an "alert".
+    Names match Logitech's official HID++ 2.0 HAPTIC 0x19B0 waveform catalogue
+    (confirmed via fn 0x00 waveform bitmask 0x7FFF = waveforms 0..14).
+    Legacy aliases are preserved for backwards compatibility.
     """
+    SHARP_STATE_CHANGE = 0
+    DAMP_STATE_CHANGE = 1
+    SHARP_COLLISION = 2
+    DAMP_COLLISION = 3
+    SUBTLE_COLLISION = 4
+    HAPPY_ALERT = 5
+    ANGRY_ALERT = 6
+    COMPLETED = 7
+    SQUARE = 8
+    WAVE = 9
+    FIREWORK = 10
+    MAD = 11
+    KNOCK = 12
+    JINGLE = 13
+    RINGING = 14
+
+    # Backwards-compatible aliases
     SUBTLE_TICK = 0
     LIGHT_CLICK = 1
     MEDIUM_CLICK = 2
@@ -154,6 +185,41 @@ class HapticPattern(IntEnum):
     SUCCESS = 12
     ERROR = 13
     NOTIFICATION = 14
+
+
+class WheelMode(IntEnum):
+    """SMART_SHIFT_ENHANCED (0x2111) wheelMode byte."""
+    KEEP = 0
+    FREESPIN = 1
+    RATCHET = 2
+
+
+class HiresFlag(IntEnum):
+    """HIRES_WHEEL (0x2121) setWheelMode / getWheelMode flags byte."""
+    DIVERT = 0x01   # target: 0 = HID, 1 = HID++ notification
+    HIRES = 0x02    # resolution: 0 = low-res, 1 = high-res
+    INVERT = 0x04   # direction: 0 = normal, 1 = inverted
+
+
+class BusType(IntEnum):
+    """HOSTS_INFO (0x1815) per-host busType byte."""
+    UNKNOWN = 0
+    EQUAD = 1
+    USB = 2
+    BLUETOOTH = 3
+    BLUETOOTH_LE = 4
+    BOLT = 5
+
+    @classmethod
+    def label(cls, value: int) -> str:
+        return {
+            0: "Unknown",
+            1: "Unifying",
+            2: "USB",
+            3: "Bluetooth",
+            4: "Bluetooth LE",
+            5: "Logi Bolt",
+        }.get(int(value), f"Bus {value}")
 
 
 # ───────────────────────────── Error type ────────────────────────────────

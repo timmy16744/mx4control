@@ -1,0 +1,1155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MX4 Studio — Logitech MX Master 4</title>
+  <link rel="stylesheet" href="./studio.css" />
+  <script src="./vendor/qwebchannel.js"></script>
+</head>
+<body>
+  <div class="studio-shell">
+    <!-- ═══════════════ FULL-BLEED 100% 3D HARDWARE STAGE ═══════════════ -->
+    <section class="stage-pane" aria-label="Interactive 3D MX Master 4">
+      <canvas id="mx4-canvas" class="stage-canvas"></canvas>
+
+      <!-- 3D Projected Hotspot Pins (shown on Buttons tab) -->
+      <div class="stage-pins" id="stage-pins" aria-hidden="true"></div>
+    </section>
+
+    <!-- Hover HUD Callout over 3D Mouse (top-level stacking so it never clips under panels!) -->
+    <div class="stage-tooltip" id="stage-tooltip" hidden>
+      <div class="tip-top-row">
+        <span class="tip-dot" aria-hidden="true"></span>
+        <span class="tip-title" id="tip-title"></span>
+        <span class="tip-cid" id="tip-cid"></span>
+      </div>
+      <span class="tip-sub" id="tip-sub"></span>
+    </div>
+
+    <!-- ═══════════════ FLOATING TOP SPATIAL CHROME ═══════════════ -->
+    <header class="studio-topbar">
+      <div class="brand-cluster">
+        <div class="brand-dot" aria-hidden="true"></div>
+        <div class="brand-text">
+          <span class="brand-name">MX4 STUDIO</span>
+          <span class="brand-tag">MASTER 4 · v1.0</span>
+        </div>
+      </div>
+
+      <nav class="pill-dock" aria-label="Hardware sections">
+        <button type="button" class="dock-btn is-active" data-tab="device">
+          <span class="dock-indicator" aria-hidden="true"></span>
+          <svg viewBox="0 0 24 24" class="dock-icon" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="6"/><line x1="12" y1="6.5" x2="12" y2="10.5"/></svg>
+          <span>Device</span>
+        </button>
+        <button type="button" class="dock-btn" data-tab="scroll">
+          <svg viewBox="0 0 24 24" class="dock-icon" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/><path d="M12 7v10M9 9.5l3-3 3 3M9 14.5l3 3 3-3"/></svg>
+          <span>Scroll</span>
+        </button>
+        <button type="button" class="dock-btn" data-tab="haptics">
+          <svg viewBox="0 0 24 24" class="dock-icon" aria-hidden="true"><path d="M2 12h3l2.5-6 3 12 3-9 2.5 5 2-2h4"/></svg>
+          <span>Haptics</span>
+        </button>
+        <button type="button" class="dock-btn" data-tab="ring">
+          <svg viewBox="0 0 24 24" class="dock-icon" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3"/><path d="M12 3.5v5.5M12 15v5.5M3.5 12H9M15 12h5.5"/></svg>
+          <span>Ring</span>
+        </button>
+        <button type="button" class="dock-btn" data-tab="buttons">
+          <svg viewBox="0 0 24 24" class="dock-icon" aria-hidden="true"><rect x="3" y="4" width="8" height="7" rx="2"/><rect x="13" y="4" width="8" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/></svg>
+          <span>Buttons</span>
+        </button>
+        <button type="button" class="dock-btn" data-tab="diagnostics">
+          <svg viewBox="0 0 24 24" class="dock-icon" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h14"/><circle cx="19" cy="12" r="2.5"/></svg>
+          <span>Lab</span>
+        </button>
+      </nav>
+
+      <div class="topbar-status">
+        <div class="live-chip" id="live-status-chip">
+          <span class="live-dot" id="live-dot"></span>
+          <span id="live-status-text">Connecting…</span>
+        </div>
+        <button type="button" class="icon-btn" id="btn-refresh-all" title="Sync from hardware" aria-label="Sync from hardware">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66L20 8.7M20 4v4.7h-4.7"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- ═══════════════ FLOATING STAGE HUD (LEFT) ═══════════════ -->
+    <div class="stage-hud-top">
+      <div class="hud-identity">
+        <h1 class="hud-mouse-name" id="hud-mouse-name">MX Master 4</h1>
+        <button type="button" class="hud-edit-btn" id="btn-rename-mouse" title="Rename mouse in firmware" aria-label="Rename mouse">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10.5-10.5-4-4L4 16v4zM13.5 6.5l4 4"/></svg>
+        </button>
+      </div>
+      <p class="hud-sub" id="hud-sub">BOLT · Searching for hardware…</p>
+    </div>
+
+    <div class="stage-hud-bottom">
+      <div class="hud-metrics">
+        <div class="hud-metric">
+          <span class="metric-label">BATTERY</span>
+          <span class="metric-value" id="hud-battery">—</span>
+        </div>
+        <div class="hud-metric">
+          <span class="metric-label">DPI</span>
+          <span class="metric-value" id="hud-dpi">—</span>
+        </div>
+        <div class="hud-metric">
+          <span class="metric-label">MODE</span>
+          <span class="metric-value" id="hud-mode">—</span>
+        </div>
+        <div class="hud-metric">
+          <span class="metric-label">PROFILE</span>
+          <span class="metric-value" id="hud-profile">default</span>
+        </div>
+      </div>
+
+      <div class="stage-controls">
+        <button type="button" class="stage-link-btn" id="btn-pulse-haptic">Pulse Haptic</button>
+        <button type="button" class="stage-link-btn" id="btn-reset-cam">Reset View</button>
+        <button type="button" class="stage-link-btn" id="btn-toggle-motion">Pause Motion</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════ FLOATING SMOKED-GLASS RIGHT INSPECTOR MONOLITH ═══════════════ -->
+    <aside class="inspector-shell" aria-label="Hardware controls">
+      <div class="inspector-pane scroller" id="inspector-pane" aria-live="polite">
+
+        <!-- ─────────── DIRECT CLICKED-CONTROL INSPECTOR (Zooms camera onto clicked part!) ─────────── -->
+        <div class="focus-panel" id="control-focus-panel" hidden>
+          <div class="focus-topbar">
+            <button type="button" class="btn-secondary sm" id="btn-focus-back">← Back</button>
+            <span class="cid-pill" id="focus-cid-pill">0x0052</span>
+          </div>
+
+          <div class="panel-header">
+            <h2 class="panel-title" id="focus-title" tabindex="-1">Control Settings</h2>
+            <p class="panel-desc" id="focus-desc">Focused directly on the selected hardware control.</p>
+          </div>
+
+          <!-- A. Direct Action Binding Card (for all clickable buttons, clickers, Mode-Shift, Thumb Pad) -->
+          <div class="glass-card" id="focus-binding-card">
+            <div class="card-head compact-head">
+              <div>
+                <div class="card-label">DIRECT BUTTON ACTION</div>
+                <div class="card-title">Assigned Behavior</div>
+              </div>
+              <span class="binding-pill" id="focus-current-badge">Default</span>
+            </div>
+
+            <div class="focus-locked-note" id="focus-locked-note" hidden>
+              Firmware-locked primary mouse click. You can still inspect it here or jump to pointer sensitivity.
+            </div>
+
+            <div id="focus-binding-editor" class="focus-editor-stack">
+              <div class="inline-field">
+                <label for="focus-scope-sel" class="field-caption">PROFILE SCOPE</label>
+                <select id="focus-scope-sel" class="studio-select"></select>
+              </div>
+
+              <div class="inline-field">
+                <label for="focus-action-type" class="field-caption">ACTION MODE</label>
+                <select id="focus-action-type" class="studio-select">
+                  <option value="default">Default (Factory Firmware)</option>
+                  <option value="keystroke">Keystroke Shortcut</option>
+                  <option value="key_hold">Hold Key (Push-to-Talk)</option>
+                  <option value="command">Shell Command</option>
+                  <option value="application">Launch Application</option>
+                  <option value="dpi_cycle">Cycle DPI Presets</option>
+                  <option value="dpi_set">Set Fixed DPI</option>
+                  <option value="smartshift_toggle">Toggle Free-Spin / SmartShift</option>
+                  <option value="host_next">Switch to Next Easy-Switch Host</option>
+                  <option value="haptic">Play Haptic Waveform</option>
+                  <option value="remap">Hardware Firmware Remap</option>
+                  <option value="disabled">Disabled (Swallow Input)</option>
+                </select>
+              </div>
+
+              <div id="focus-field-text" class="inline-field" hidden>
+                <label for="focus-action-data" class="field-caption" id="focus-data-label">PAYLOAD</label>
+                <div class="input-action-row">
+                  <input type="text" id="focus-action-data" class="studio-input" placeholder="ctrl+shift+t" />
+                  <button type="button" class="btn-secondary sm" id="btn-focus-record" hidden>Record</button>
+                </div>
+                <div class="chip-grid" id="focus-quick-keys" hidden></div>
+              </div>
+
+              <div id="focus-field-remap" class="inline-field" hidden>
+                <label for="focus-remap-target" class="field-caption">TARGET PHYSICAL BUTTON</label>
+                <select id="focus-remap-target" class="studio-select">
+                  <option value="80">Left Click</option>
+                  <option value="81">Right Click</option>
+                  <option value="82">Wheel Click</option>
+                  <option value="83">Back</option>
+                  <option value="86">Forward</option>
+                  <option value="196">Mode Shift</option>
+                  <option value="195">Gesture Button</option>
+                </select>
+              </div>
+
+              <div class="btn-group focus-apply-row">
+                <button type="button" class="btn-primary sm" id="btn-focus-apply">Apply to Mouse</button>
+                <button type="button" class="btn-secondary sm" id="btn-focus-reset-default">Reset Default</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- B. Direct Horizontal Thumb Wheel Card (shown when clicking the Thumb Wheel 0x2150!) -->
+          <div class="glass-card stack-switches" id="focus-thumbwheel-card" hidden>
+            <div class="card-head compact-head">
+              <div>
+                <div class="card-label">HORIZONTAL THUMB WHEEL · 0x2150</div>
+                <div class="card-title">Thumb Wheel Engine <span class="title-inline-sub" id="focus-tw-badge">Native · 20/rev</span></div>
+              </div>
+              <div class="mono-readout sm" id="focus-tw-speed-readout">1.00<small>×</small></div>
+            </div>
+
+            <div class="tw-mode-pills" id="focus-tw-mode-pills" role="radiogroup" aria-label="Thumb wheel mode">
+              <button type="button" class="tw-mode-pill" data-focus-tw-mode="hd_scroll">HD Scroll 6×</button>
+              <button type="button" class="tw-mode-pill" data-focus-tw-mode="native">Native 1×</button>
+              <button type="button" class="tw-mode-pill" data-focus-tw-mode="actions">Actions</button>
+            </div>
+
+            <label class="switch-row">
+              <span><strong>Invert Thumb Wheel</strong><small>Flip horizontal scroll direction</small></span>
+              <input type="checkbox" id="focus-tw-invert" class="studio-switch" />
+            </label>
+
+            <div id="focus-tw-hd-wrap" class="tw-hd-block" hidden>
+              <div class="divider"></div>
+              <div class="chip-grid" id="focus-tw-hd-presets">
+                <button type="button" class="studio-chip" data-tw-preset-hd="precision" data-speed="0.65" data-smooth="20" data-accel="0">Precision 0.65×</button>
+                <button type="button" class="studio-chip" data-tw-preset-hd="timeline" data-speed="1.15" data-smooth="55" data-accel="30">Timeline 1.15×</button>
+                <button type="button" class="studio-chip" data-tw-preset-hd="turbo" data-speed="2.20" data-smooth="35" data-accel="70">Turbo Pan 2.2×</button>
+                <button type="button" class="studio-chip" data-tw-preset-hd="raw" data-speed="1.00" data-smooth="0" data-accel="0">Raw 6× 1.0×</button>
+              </div>
+              <div class="card-head compact-head">
+                <span class="field-caption">HORIZONTAL SPEED</span>
+                <span class="mono-readout sm" id="focus-tw-speed-val">1.00×</span>
+              </div>
+              <input type="range" id="focus-tw-speed" class="studio-slider" min="0.20" max="4.00" step="0.05" value="1.00" />
+              <div class="card-head compact-head">
+                <span class="field-caption">144 HZ SMOOTHNESS</span>
+                <span class="mono-readout sm" id="focus-tw-smooth-val">35%</span>
+              </div>
+              <input type="range" id="focus-tw-smooth" class="studio-slider" min="0" max="100" step="5" value="35" />
+              <div class="card-head compact-head">
+                <span class="field-caption">FLICK ACCELERATION</span>
+                <span class="mono-readout sm" id="focus-tw-accel-val">25%</span>
+              </div>
+              <input type="range" id="focus-tw-accel" class="studio-slider" min="0" max="100" step="5" value="25" />
+              <label class="switch-row">
+                <span><strong>Sub-Detent Hi-Res</strong><small>Emit REL_HWHEEL_HI_RES (120 ticks/rev)</small></span>
+                <input type="checkbox" id="focus-tw-hires" class="studio-switch" checked />
+              </label>
+              <label class="switch-row">
+                <span><strong>Virtual Haptic Detents</strong><small>Crisp LRA micro-click while rolling the thumb wheel</small></span>
+                <input type="checkbox" id="focus-tw-haptic-detent" class="studio-switch" />
+              </label>
+              <div class="dual-action-grid">
+                <div>
+                  <label for="focus-tw-haptic-density" class="field-caption">DETENT DENSITY</label>
+                  <select id="focus-tw-haptic-density" class="studio-select">
+                    <option value="6">6× Micro (120/rev)</option>
+                    <option value="3">3× Fine (60/rev)</option>
+                    <option value="2">2× Medium (40/rev)</option>
+                    <option value="1">1× Notch (20/rev)</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="focus-tw-haptic-pattern" class="field-caption">TICK WAVEFORM</label>
+                  <select id="focus-tw-haptic-pattern" class="studio-select">
+                    <option value="0">0 · Sharp State</option>
+                    <option value="1">1 · Damp State</option>
+                    <option value="2">2 · Sharp Impact</option>
+                    <option value="4">4 · Subtle Impact</option>
+                    <option value="12">12 · Knock</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div id="focus-tw-custom-wrap" class="focus-editor-stack" hidden>
+              <div class="divider"></div>
+              <div class="inline-field">
+                <label for="focus-tw-preset" class="field-caption">ACTION PRESET</label>
+                <select id="focus-tw-preset" class="studio-select"></select>
+              </div>
+              <div class="dual-action-grid">
+                <div>
+                  <label for="focus-tw-pos-data" class="field-caption">SCROLL FORWARD</label>
+                  <div class="compact-pair">
+                    <select id="focus-tw-pos-type" class="studio-select mini">
+                      <option value="keystroke">Key</option>
+                      <option value="command">Cmd</option>
+                      <option value="application">App</option>
+                      <option value="disabled">Off</option>
+                    </select>
+                    <input type="text" id="focus-tw-pos-data" class="studio-input" />
+                  </div>
+                </div>
+                <div>
+                  <label for="focus-tw-neg-data" class="field-caption">SCROLL BACK</label>
+                  <div class="compact-pair">
+                    <select id="focus-tw-neg-type" class="studio-select mini">
+                      <option value="keystroke">Key</option>
+                      <option value="command">Cmd</option>
+                      <option value="application">App</option>
+                      <option value="disabled">Off</option>
+                    </select>
+                    <input type="text" id="focus-tw-neg-data" class="studio-input" />
+                  </div>
+                </div>
+              </div>
+              <div class="card-head compact-head">
+                <span class="field-caption">STEP RESOLUTION (120 TICKS/REV)</span>
+                <span class="mono-readout sm" id="focus-tw-step-readout">16 ticks</span>
+              </div>
+              <input type="range" id="focus-tw-step" class="studio-slider" min="1" max="120" step="1" value="16" />
+              <div class="slider-marks"><span>1 · Ultra-Fine</span><span>16 · Balanced</span><span>120 · 1/rev</span></div>
+              <label class="switch-row">
+                <span><strong>Haptic Detent Tick</strong><small>Play crisp LRA tick on each thumb-wheel action</small></span>
+                <input type="checkbox" id="focus-tw-haptic" class="studio-switch" />
+              </label>
+              <label class="switch-row">
+                <span><strong>6× Digital Crown Micro-Ticks</strong><small>Feel subtle 6× micro-detents between action steps</small></span>
+                <input type="checkbox" id="focus-tw-micro-haptics" class="studio-switch" checked />
+              </label>
+              <div class="inline-field">
+                <label for="focus-tw-action-pattern" class="field-caption">ACTION TICK WAVEFORM</label>
+                <select id="focus-tw-action-pattern" class="studio-select">
+                  <option value="0">0 · Sharp State</option>
+                  <option value="1">1 · Damp State</option>
+                  <option value="2">2 · Sharp Impact</option>
+                  <option value="4">4 · Subtle Impact</option>
+                  <option value="12">12 · Knock</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- C. Direct Contextual Hardware Tuning Card (for MagSpeed Wheel / Thumb Pad / Mode-Shift / Clickers) -->
+          <div class="glass-card" id="focus-context-card" hidden>
+            <div class="card-head compact-head">
+              <div>
+                <div class="card-label" id="focus-ctx-label">HARDWARE ENGINE</div>
+                <div class="card-title" id="focus-ctx-title">Related Hardware Tuning</div>
+              </div>
+            </div>
+            <p class="card-sub" id="focus-ctx-desc"></p>
+            <div class="btn-group" id="focus-ctx-actions"></div>
+          </div>
+        </div>
+
+        <!-- ─────────── TAB 1: DEVICE (Pointer & Hosts) ─────────── -->
+        <div class="tab-panel is-active" id="panel-device" data-panel="device">
+          <div class="panel-header">
+            <h2 class="panel-title" tabindex="-1">Pointer &amp; Hosts</h2>
+            <p class="panel-desc">Direct Darkfield 8K sensor tuning, DPI cycle stages, and Easy-Switch slots.</p>
+          </div>
+
+          <div class="glass-card">
+            <div class="card-head">
+              <div>
+                <div class="card-label">OPTICAL SENSOR · VERNIER · 0x2201</div>
+                <div class="card-title">Pointer Sensitivity</div>
+              </div>
+              <div class="mono-readout"><span id="dpi-readout">1000</span> <small>DPI</small></div>
+            </div>
+
+            <!-- Precision Vernier DPI Slider with Stage Markers -->
+            <div class="vernier-wrap" data-vernier="dpi">
+              <div class="vernier-ticks" id="dpi-vernier-ticks" aria-hidden="true"></div>
+              <div class="vernier-stages" id="dpi-vernier-stages" aria-hidden="true"></div>
+              <div class="vernier-rail">
+                <div class="vernier-fill dpi-grad" id="dpi-vernier-fill"></div>
+              </div>
+              <input type="range" id="dpi-slider" class="vernier-input" min="200" max="8000" step="50" value="1000" aria-label="Pointer DPI" />
+            </div>
+            <div class="slider-marks"><span>200</span><span>1600</span><span>4000</span><span>8000</span></div>
+            <div class="chip-grid" id="dpi-chips"></div>
+
+            <div class="divider"></div>
+            <div class="inline-field">
+              <label for="dpi-cycle-input" class="field-caption">DPI CYCLE STAGES</label>
+              <div class="input-action-row">
+                <input type="text" id="dpi-cycle-input" class="studio-input mono-input" placeholder="800, 1200, 1600, 2400, 4000" />
+                <button type="button" class="btn-secondary sm" id="btn-save-dpi-cycle">Save</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-eyebrow">EASY-SWITCH HOSTS · 0x1814 / 0x1815</div>
+          <div class="hosts-stack" id="hosts-stack"></div>
+
+          <div class="glass-card compact-row">
+            <div>
+              <div class="card-title">Quick Hardware Actions</div>
+              <div class="card-sub">Send live haptic confirmation or re-apply all persisted settings.</div>
+            </div>
+            <div class="btn-group">
+              <button type="button" class="btn-primary sm" id="btn-identify-mouse">Identify</button>
+              <button type="button" class="btn-secondary sm" id="btn-reapply-device">Sync All</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ─────────── TAB 2: SCROLL (MagSpeed Dynamics) ─────────── -->
+        <div class="tab-panel" id="panel-scroll" data-panel="scroll" hidden>
+          <div class="panel-header">
+            <h2 class="panel-title" tabindex="-1">MagSpeed Dynamics</h2>
+            <p class="panel-desc">Tuning the electromagnetic force, SmartShift sensitivity, and wheel haptics.</p>
+          </div>
+
+          <!-- SmartShift Mode Pill Selector (matches Mockup 2!) -->
+          <div class="glass-card">
+            <div class="card-head compact-head">
+              <div>
+                <div class="card-label">SMARTSHIFT FORCE &amp; SENSING · 0x2111</div>
+                <div class="card-title">SmartShift Mode <span class="title-inline-sub">Electromagnetic clutch behavior</span></div>
+              </div>
+            </div>
+            <div class="field-caption">Mode Selector</div>
+            <div class="mode-pills" role="radiogroup" aria-label="MagSpeed scroll mode">
+              <button type="button" class="mode-pill" data-scroll-mode="ratchet">
+                <span>Ratchet</span>
+                <span class="mode-check" aria-hidden="true">✓</span>
+              </button>
+              <button type="button" class="mode-pill is-active" data-scroll-mode="smart">
+                <span>SmartShift</span>
+                <span class="mode-check" aria-hidden="true">✓</span>
+              </button>
+              <button type="button" class="mode-pill" data-scroll-mode="free">
+                <span>Free-Spin</span>
+                <span class="mode-check" aria-hidden="true">✓</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- SmartShift Threshold Vernier Ruler -->
+          <div class="glass-card" id="card-smartshift-thr">
+            <div class="card-head">
+              <div>
+                <div class="card-label">SMARTSHIFT THRESHOLD</div>
+                <div class="card-title">Auto-Disengage Velocity</div>
+              </div>
+              <div class="mono-readout"><span id="ss-thr-readout">15</span></div>
+            </div>
+            <div class="vernier-wrap" data-vernier="smartshift">
+              <div class="vernier-ticks" id="ss-vernier-ticks" aria-hidden="true"></div>
+              <div class="vernier-rail">
+                <div class="vernier-fill cyan-copper-grad" id="ss-vernier-fill"></div>
+              </div>
+              <input type="range" id="ss-thr-slider" class="vernier-input" min="1" max="50" step="1" value="15" aria-label="SmartShift threshold" />
+            </div>
+            <div class="slider-marks"><span>1 · Light flick</span><span>25</span><span>50 · Hard flick</span></div>
+          </div>
+
+          <!-- Precision Shift Force Interactive S-Curve Graph (Hardware Ratchet Torque 1-100%!) -->
+          <div class="glass-card" id="card-torque">
+            <div class="card-head">
+              <div>
+                <div class="card-label">PRECISION SHIFT FORCE · 0x2111</div>
+                <div class="card-title">Precision Shift Curve</div>
+              </div>
+              <div class="mono-readout"><span id="torque-readout">75</span><small>%</small></div>
+            </div>
+            <div class="curve-graph-wrap" id="torque-curve-wrap">
+              <svg id="torque-curve-svg" class="curve-svg" viewBox="0 0 420 156" role="slider" tabindex="0"
+                   aria-label="Precision Shift Force ratchet torque curve" aria-valuemin="1" aria-valuemax="100" aria-valuenow="75">
+                <defs>
+                  <linearGradient id="curveAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#3cd8e0" stop-opacity="0.34" />
+                    <stop offset="100%" stop-color="#3cd8e0" stop-opacity="0.02" />
+                  </linearGradient>
+                  <linearGradient id="curveStrokeGrad" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stop-color="#32a8b8" />
+                    <stop offset="55%" stop-color="#6ce8ee" />
+                    <stop offset="100%" stop-color="#b8f8fc" />
+                  </linearGradient>
+                  <filter id="nodeGlow" x="-60%" y="-60%" width="220%" height="220%">
+                    <feGaussianBlur stdDeviation="4.5" result="blur" />
+                    <feMerge>
+                      <feMergeNode in="blur" />
+                      <feMergeNode in="SourceGraphic" />
+                    </feMerge>
+                  </filter>
+                </defs>
+                <g id="curve-grid-group"></g>
+                <path id="curve-area-path" fill="url(#curveAreaGrad)" />
+                <path id="curve-stroke-path" fill="none" stroke="url(#curveStrokeGrad)" stroke-width="2.1" stroke-linecap="round" />
+                <circle id="curve-node-halo" cx="210" cy="70" r="11" fill="#e6a866" fill-opacity="0.22" />
+                <circle id="curve-node" cx="210" cy="70" r="5.4" fill="#ffe1b8" stroke="#e29f58" stroke-width="2" filter="url(#nodeGlow)" />
+                <g id="curve-axis-labels"></g>
+              </svg>
+            </div>
+            <!-- Hidden accessible range input kept synchronized for presets / keyboard -->
+            <input type="hidden" id="torque-slider" value="75" />
+            <div class="chip-grid">
+              <button type="button" class="studio-chip" data-torque="25">Light 25%</button>
+              <button type="button" class="studio-chip" data-torque="50">Balanced 50%</button>
+              <button type="button" class="studio-chip" data-torque="75">Crisp 75%</button>
+              <button type="button" class="studio-chip" data-torque="100">Heavy 100%</button>
+            </div>
+          </div>
+
+          <div class="glass-card compact-row">
+            <div>
+              <div class="card-title">Quick Hardware Actions</div>
+              <div class="card-sub">Send live haptic confirmation or re-apply all persisted settings.</div>
+            </div>
+            <div class="btn-group">
+              <button type="button" class="btn-primary sm" data-action="identify">Identify</button>
+              <button type="button" class="btn-secondary sm" data-action="sync-all">Sync All</button>
+            </div>
+          </div>
+
+          <div class="section-eyebrow">HD SMOOTH SCROLL ENGINE · 0x2121 · 144 HZ</div>
+          <div class="glass-card" id="card-smooth-scroll">
+            <div class="card-head compact-head">
+              <div>
+                <div class="card-label">INTERPOLATION &amp; SPEED ENGINE</div>
+                <div class="card-title">HD Smooth Scroll <span class="title-inline-sub" id="smooth-engine-badge">Native bypass</span></div>
+              </div>
+              <div class="mono-readout sm"><span id="scroll-speed-readout">1.00</span><small>×</small></div>
+            </div>
+
+            <div class="chip-grid" id="scroll-tuning-presets">
+              <button type="button" class="studio-chip is-active" data-scroll-preset="native" data-speed="1.00" data-smooth="0" data-accel="0">Native 1.0×</button>
+              <button type="button" class="studio-chip" data-scroll-preset="precision" data-speed="0.60" data-smooth="25" data-accel="0">Precision 0.6×</button>
+              <button type="button" class="studio-chip" data-scroll-preset="silky" data-speed="1.20" data-smooth="55" data-accel="20">Silky HD 1.2×</button>
+              <button type="button" class="studio-chip" data-scroll-preset="glide" data-speed="1.50" data-smooth="85" data-accel="35">Mac Glide 1.5×</button>
+            </div>
+
+            <div class="smooth-param-block">
+              <div class="card-head compact-head">
+                <span class="field-caption">SCROLL SPEED / SENSITIVITY</span>
+                <span class="mono-readout sm" id="scroll-speed-val">1.00×</span>
+              </div>
+              <div class="vernier-wrap" data-vernier="scroll-speed">
+                <div class="vernier-ticks" id="scroll-speed-ticks" aria-hidden="true"></div>
+                <div class="vernier-rail">
+                  <div class="vernier-fill cyan-copper-grad" id="scroll-speed-fill"></div>
+                </div>
+                <input type="range" id="scroll-speed-slider" class="vernier-input" min="0.20" max="4.00" step="0.05" value="1.00" aria-label="Scroll speed multiplier" />
+              </div>
+              <div class="slider-marks"><span>0.20× Fine</span><span>1.00× Native</span><span>4.00× Fast</span></div>
+            </div>
+
+            <div class="smooth-param-block">
+              <div class="card-head compact-head">
+                <span class="field-caption">HD SMOOTHNESS (144 HZ DAMPING)</span>
+                <span class="mono-readout sm" id="scroll-smooth-val">0%</span>
+              </div>
+              <div class="vernier-wrap" data-vernier="scroll-smooth">
+                <div class="vernier-ticks" id="scroll-smooth-ticks" aria-hidden="true"></div>
+                <div class="vernier-rail">
+                  <div class="vernier-fill copper-grad" id="scroll-smooth-fill"></div>
+                </div>
+                <input type="range" id="scroll-smooth-slider" class="vernier-input" min="0" max="100" step="5" value="0" aria-label="HD scroll smoothness" />
+              </div>
+              <div class="slider-marks"><span>0% Crisp</span><span>50% Silky</span><span>100% Liquid</span></div>
+            </div>
+
+            <div class="smooth-param-block">
+              <div class="card-head compact-head">
+                <span class="field-caption">DYNAMIC FLICK ACCELERATION</span>
+                <span class="mono-readout sm" id="scroll-accel-val">0%</span>
+              </div>
+              <div class="vernier-wrap" data-vernier="scroll-accel">
+                <div class="vernier-ticks" id="scroll-accel-ticks" aria-hidden="true"></div>
+                <div class="vernier-rail">
+                  <div class="vernier-fill cyan-copper-grad" id="scroll-accel-fill"></div>
+                </div>
+                <input type="range" id="scroll-accel-slider" class="vernier-input" min="0" max="100" step="5" value="0" aria-label="Dynamic scroll acceleration" />
+              </div>
+              <div class="slider-marks"><span>0% Linear</span><span>50% Progressive</span><span>100% Boost</span></div>
+            </div>
+
+            <div class="divider"></div>
+            <div class="card-head compact-head">
+              <span class="field-caption">LIVE SCROLL FEEL TEST PAD</span>
+              <span class="mono-readout sm" id="scroll-test-delta">Scroll here to test</span>
+            </div>
+            <div class="scroll-test-pad scroller" id="scroll-test-pad" tabindex="0" aria-label="Scroll feel test pad">
+              <div class="scroll-test-ruler" id="scroll-test-ruler"></div>
+            </div>
+          </div>
+
+          <div class="section-eyebrow">HI-RES VERTICAL · 0x2121</div>
+          <div class="glass-card stack-switches">
+            <label class="switch-row">
+              <span><strong>High-Resolution Scrolling</strong><small>Sub-detent smooth pixel scroll (0x2121)</small></span>
+              <input type="checkbox" id="sw-hires" class="studio-switch" />
+            </label>
+            <label class="switch-row">
+              <span><strong>Invert Vertical Scroll</strong><small>Natural scrolling applied in mouse hardware</small></span>
+              <input type="checkbox" id="sw-hires-invert" class="studio-switch" />
+            </label>
+          </div>
+
+          <div class="section-eyebrow">THUMB WHEEL 6× HD ENGINE · 0x2150 · 120 TICKS/REV</div>
+          <div class="glass-card stack-switches" id="card-thumbwheel">
+            <div class="card-head compact-head">
+              <div>
+                <div class="card-label">CNC HORIZONTAL WHEEL · 6× DIVERTED DETAIL</div>
+                <div class="card-title">Thumb Wheel <span class="title-inline-sub" id="tw-engine-badge">Native · 20/rev</span></div>
+              </div>
+              <div class="mono-readout sm"><span id="tw-speed-readout">1.00</span><small>×</small></div>
+            </div>
+
+            <div class="tw-mode-pills" id="tw-mode-pills" role="radiogroup" aria-label="Thumb wheel mode">
+              <button type="button" class="tw-mode-pill" data-tw-mode="hd_scroll">HD Scroll 6×</button>
+              <button type="button" class="tw-mode-pill is-active" data-tw-mode="native">Native 1×</button>
+              <button type="button" class="tw-mode-pill" data-tw-mode="actions">Actions</button>
+            </div>
+
+            <label class="switch-row">
+              <span><strong>Invert Thumb Wheel</strong><small>Flip horizontal scroll direction (0x2150)</small></span>
+              <input type="checkbox" id="sw-tw-invert" class="studio-switch" />
+            </label>
+
+            <div class="tw-hd-block" id="tw-hd-block" hidden>
+              <div class="divider"></div>
+              <div class="chip-grid" id="tw-hd-presets">
+                <button type="button" class="studio-chip" data-tw-preset-hd="precision" data-speed="0.65" data-smooth="20" data-accel="0">Precision Scrub</button>
+                <button type="button" class="studio-chip" data-tw-preset-hd="timeline" data-speed="1.15" data-smooth="55" data-accel="30">Silky Timeline</button>
+                <button type="button" class="studio-chip" data-tw-preset-hd="turbo" data-speed="2.20" data-smooth="35" data-accel="70">Turbo Pan</button>
+                <button type="button" class="studio-chip" data-tw-preset-hd="raw" data-speed="1.00" data-smooth="0" data-accel="0">Raw 6× Pixel</button>
+              </div>
+
+              <div class="smooth-param-block">
+                <div class="card-head compact-head">
+                  <span class="field-caption">HORIZONTAL SPEED / SENSITIVITY</span>
+                  <span class="mono-readout sm" id="tw-speed-val">1.00×</span>
+                </div>
+                <div class="vernier-wrap" data-vernier="tw-speed">
+                  <div class="vernier-ticks" id="tw-speed-ticks" aria-hidden="true"></div>
+                  <div class="vernier-rail">
+                    <div class="vernier-fill cyan-copper-grad" id="tw-speed-fill"></div>
+                  </div>
+                  <input type="range" id="tw-speed-slider" class="vernier-input" min="0.20" max="4.00" step="0.05" value="1.00" aria-label="Thumb wheel horizontal speed" />
+                </div>
+                <div class="slider-marks"><span>0.20× Micro</span><span>1.00× Balanced</span><span>4.00× Fast</span></div>
+              </div>
+
+              <div class="smooth-param-block">
+                <div class="card-head compact-head">
+                  <span class="field-caption">HD SMOOTHNESS (144 HZ GLIDE)</span>
+                  <span class="mono-readout sm" id="tw-smooth-val">35%</span>
+                </div>
+                <div class="vernier-wrap" data-vernier="tw-smooth">
+                  <div class="vernier-ticks" id="tw-smooth-ticks" aria-hidden="true"></div>
+                  <div class="vernier-rail">
+                    <div class="vernier-fill copper-grad" id="tw-smooth-fill"></div>
+                  </div>
+                  <input type="range" id="tw-smooth-slider" class="vernier-input" min="0" max="100" step="5" value="35" aria-label="Thumb wheel smoothness" />
+                </div>
+                <div class="slider-marks"><span>0% Crisp</span><span>50% Silky</span><span>100% Liquid</span></div>
+              </div>
+
+              <div class="smooth-param-block">
+                <div class="card-head compact-head">
+                  <span class="field-caption">DYNAMIC FLICK ACCELERATION</span>
+                  <span class="mono-readout sm" id="tw-accel-val">25%</span>
+                </div>
+                <div class="vernier-wrap" data-vernier="tw-accel">
+                  <div class="vernier-ticks" id="tw-accel-ticks" aria-hidden="true"></div>
+                  <div class="vernier-rail">
+                    <div class="vernier-fill cyan-copper-grad" id="tw-accel-fill"></div>
+                  </div>
+                  <input type="range" id="tw-accel-slider" class="vernier-input" min="0" max="100" step="5" value="25" aria-label="Thumb wheel acceleration" />
+                </div>
+                <div class="slider-marks"><span>0% Linear</span><span>50% Progressive</span><span>100% Boost</span></div>
+              </div>
+
+              <label class="switch-row">
+                <span><strong>Sub-Detent Hi-Res Output</strong><small>Stream 120-tick/rev REL_HWHEEL_HI_RES sub-pixel events</small></span>
+                <input type="checkbox" id="sw-tw-hires" class="studio-switch" checked />
+              </label>
+              <label class="switch-row">
+                <span><strong>Virtual Haptic Micro-Detents</strong><small>Fire crisp LRA click while rolling the thumb wheel</small></span>
+                <input type="checkbox" id="sw-tw-haptic-detent" class="studio-switch" />
+              </label>
+              <div class="dual-action-grid">
+                <div>
+                  <label for="tw-haptic-density" class="field-caption">DETENT DENSITY</label>
+                  <select id="tw-haptic-density" class="studio-select">
+                    <option value="6">6× Micro (120/rev)</option>
+                    <option value="3">3× Fine (60/rev)</option>
+                    <option value="2">2× Medium (40/rev)</option>
+                    <option value="1">1× Notch (20/rev)</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="tw-haptic-pattern" class="field-caption">TICK WAVEFORM</label>
+                  <select id="tw-haptic-pattern" class="studio-select">
+                    <option value="0">0 · Sharp State</option>
+                    <option value="1">1 · Damp State</option>
+                    <option value="2">2 · Sharp Impact</option>
+                    <option value="4">4 · Subtle Impact</option>
+                    <option value="12">12 · Knock</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="divider"></div>
+              <div class="card-head compact-head">
+                <span class="field-caption">LIVE HORIZONTAL TIMELINE TEST RULER</span>
+                <span class="mono-readout sm" id="hscroll-test-delta">Roll thumb wheel here</span>
+              </div>
+              <div class="hscroll-test-pad" id="hscroll-test-pad" tabindex="0" aria-label="Horizontal thumb wheel feel test ruler">
+                <div class="hscroll-test-track" id="hscroll-test-track"></div>
+              </div>
+            </div>
+
+            <div class="tw-custom-block" id="tw-custom-block" hidden>
+              <div class="divider"></div>
+              <div class="inline-field">
+                <label for="tw-preset" class="field-caption">ACTION PRESET</label>
+                <select id="tw-preset" class="studio-select"></select>
+              </div>
+              <div class="dual-action-grid">
+                <div>
+                  <label for="tw-pos-data" class="field-caption">SCROLL FORWARD</label>
+                  <div class="compact-pair">
+                    <select id="tw-pos-type" class="studio-select mini">
+                      <option value="keystroke">Key</option>
+                      <option value="command">Cmd</option>
+                      <option value="application">App</option>
+                      <option value="disabled">Off</option>
+                    </select>
+                    <input type="text" id="tw-pos-data" class="studio-input" />
+                  </div>
+                </div>
+                <div>
+                  <label for="tw-neg-data" class="field-caption">SCROLL BACK</label>
+                  <div class="compact-pair">
+                    <select id="tw-neg-type" class="studio-select mini">
+                      <option value="keystroke">Key</option>
+                      <option value="command">Cmd</option>
+                      <option value="application">App</option>
+                      <option value="disabled">Off</option>
+                    </select>
+                    <input type="text" id="tw-neg-data" class="studio-input" />
+                  </div>
+                </div>
+              </div>
+              <div class="card-head compact-head">
+                <span class="field-caption">STEP RESOLUTION (120 TICKS/REV)</span>
+                <span class="mono-readout sm" id="tw-step-readout">16 ticks</span>
+              </div>
+              <input type="range" id="tw-step-slider" class="studio-slider" min="1" max="120" step="1" value="16" aria-label="Thumb wheel step sensitivity" />
+              <div class="slider-marks"><span>1 · Ultra-Fine</span><span>16 · Balanced</span><span>120 · 1/rev</span></div>
+              <label class="switch-row">
+                <span><strong>Haptic Tick on Step</strong><small>Play tactile click on every thumb-wheel action</small></span>
+                <input type="checkbox" id="sw-tw-haptic" class="studio-switch" />
+              </label>
+              <label class="switch-row">
+                <span><strong>6× Digital Crown Micro-Ticks</strong><small>Feel subtle 6× micro-detents between action steps</small></span>
+                <input type="checkbox" id="sw-tw-micro-haptics" class="studio-switch" checked />
+              </label>
+              <div class="inline-field">
+                <label for="tw-action-pattern" class="field-caption">ACTION TICK WAVEFORM</label>
+                <select id="tw-action-pattern" class="studio-select">
+                  <option value="0">0 · Sharp State</option>
+                  <option value="1">1 · Damp State</option>
+                  <option value="2">2 · Sharp Impact</option>
+                  <option value="4">4 · Subtle Impact</option>
+                  <option value="12">12 · Knock</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ─────────── TAB 3: HAPTICS (Haptic Engine) ─────────── -->
+        <div class="tab-panel" id="panel-haptics" data-panel="haptics" hidden>
+          <div class="panel-header">
+            <h2 class="panel-title" tabindex="-1">Haptic Engine</h2>
+            <p class="panel-desc">Real-time haptic feedback tuning, actuator test diagnostics, and event mapping.</p>
+          </div>
+
+          <!-- Real-Time Haptic Response Live 60fps Copper Oscilloscope (matches Mockup 3!) -->
+          <div class="glass-card osc-card">
+            <div class="card-head">
+              <div class="card-title">Real-Time Haptic Response</div>
+              <label class="motor-pill-toggle" title="Toggle hardware haptic motor power (0x19B0)">
+                <span class="motor-pill-text">Motor 0x19B0</span>
+                <input type="checkbox" id="sw-haptic-motor" class="studio-switch mini-switch" />
+              </label>
+            </div>
+            <div class="osc-screen">
+              <canvas id="haptic-osc-canvas" class="osc-canvas"></canvas>
+            </div>
+          </div>
+
+          <!-- Vernier Haptic Intensity Slider (matches Mockup 3!) -->
+          <div class="glass-card" id="haptic-strength-wrap">
+            <div class="card-head">
+              <div>
+                <div class="card-label">VERNIER</div>
+                <div class="card-title">Intensity</div>
+              </div>
+              <div class="mono-readout intensity-readout">
+                <span id="haptic-strength-word">Medium</span>
+                <small id="haptic-lvl-pct">50%</small>
+              </div>
+            </div>
+            <div class="vernier-wrap" data-vernier="haptic">
+              <div class="vernier-ticks" id="haptic-vernier-ticks" aria-hidden="true"></div>
+              <div class="vernier-rail">
+                <div class="vernier-fill copper-grad" id="haptic-vernier-fill"></div>
+              </div>
+              <input type="range" id="haptic-lvl-slider" class="vernier-input" min="1" max="100" step="1" value="50" aria-label="Haptic motor strength" />
+            </div>
+          </div>
+
+          <!-- Signature Quick Feel Presets + Pulse Haptic / Sync All Action Row (matches Mockup 3!) -->
+          <div class="glass-card haptic-action-bar">
+            <div class="feel-pills">
+              <button type="button" class="feel-pill" data-feel-wave="2">Crisp Detent</button>
+              <button type="button" class="feel-pill is-active" data-feel-wave="3">Deep Thump</button>
+              <button type="button" class="feel-pill" data-feel-wave="4">Subtle Tick</button>
+            </div>
+            <div class="btn-group">
+              <button type="button" class="btn-primary sm" id="btn-haptic-pulse-main">Pulse Haptic</button>
+              <button type="button" class="btn-secondary sm" data-action="sync-all">Sync All</button>
+            </div>
+          </div>
+
+          <!-- Thumb Pad Press Force (0x19C0) + Live Press Tester -->
+          <div class="glass-card" id="card-force-pad">
+            <div class="card-head">
+              <div>
+                <div class="card-label">FORCE SENSOR · 0x19C0 · CID 0x01A0</div>
+                <div class="card-title">Haptic Sense Thumb Pad</div>
+              </div>
+              <div class="mono-readout sm"><span id="force-readout">Default</span></div>
+            </div>
+            <div class="chip-grid" id="force-preset-chips">
+              <button type="button" class="studio-chip" data-force-val="4200">Feather</button>
+              <button type="button" class="studio-chip" data-force-val="4650">Light</button>
+              <button type="button" class="studio-chip is-active" data-force-val="5195">Balanced</button>
+              <button type="button" class="studio-chip" data-force-val="6200">Firm</button>
+            </div>
+            <div class="vernier-wrap" data-vernier="force">
+              <div class="vernier-ticks" id="force-vernier-ticks" aria-hidden="true"></div>
+              <div class="vernier-rail">
+                <div class="vernier-fill cyan-copper-grad" id="force-vernier-fill"></div>
+              </div>
+              <input type="range" id="force-slider" class="vernier-input" min="4156" max="6909" step="40" value="5195" aria-label="Thumb pad press force" />
+            </div>
+            <div class="slider-marks"><span>Light touch (4156)</span><span>Factory (5195)</span><span>Firm (6909)</span></div>
+            <div class="pad-live-meter" id="pad-live-meter">
+              <span class="pad-live-dot" id="pad-live-dot"></span>
+              <span id="pad-live-text">Press physical Thumb Pad to test actuation force</span>
+              <span class="mono-readout sm" id="pad-press-count">0×</span>
+            </div>
+            <div class="force-footer">
+              <span class="card-sub mono" id="force-raw-text">Raw: 5195</span>
+              <button type="button" class="btn-secondary sm" id="btn-reset-force">Reset Default</button>
+            </div>
+          </div>
+
+          <div class="section-eyebrow">WAVEFORM BANK · ALL 15 ACTUATOR PATTERNS</div>
+          <div class="wave-grid" id="wave-grid"></div>
+
+          <div class="section-eyebrow">RING &amp; NOTIFICATION TRIGGERS</div>
+          <div class="glass-card stack-switches">
+            <div class="select-row">
+              <span><strong>Ring Boundary Tick</strong><small>Slice-crossing tactile detent</small></span>
+              <select id="sel-ring-boundary" class="studio-select"></select>
+            </div>
+            <div class="select-row">
+              <span><strong>Ring Confirmation</strong><small>Release on active action</small></span>
+              <select id="sel-ring-confirm" class="studio-select"></select>
+            </div>
+            <div class="select-row">
+              <span><strong>Ring Cancel</strong><small>Release in centre zone</small></span>
+              <select id="sel-ring-cancel" class="studio-select"></select>
+            </div>
+            <div class="divider"></div>
+            <label class="switch-row">
+              <span><strong>Desktop Notification Haptics</strong><small>Pulse on org.freedesktop.Notifications (1.5 s cooldown)</small></span>
+              <input type="checkbox" id="sw-notif-haptic" class="studio-switch" />
+            </label>
+            <div class="select-row">
+              <span><strong>Notification Waveform</strong><small>Tactile alert pattern</small></span>
+              <div class="btn-group">
+                <select id="sel-notif-pattern" class="studio-select"></select>
+                <button type="button" class="btn-secondary sm" id="btn-test-notif">Test</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ─────────── TAB 4: ACTIONS RING ─────────── -->
+        <div class="tab-panel" id="panel-ring" data-panel="ring" hidden>
+          <div class="panel-header">
+            <h2 class="panel-title" tabindex="-1">Actions Ring Studio</h2>
+            <p class="panel-desc">Cinema-grade radial overlay themes, 1-click workflow presets &amp; 60 FPS live tracking.</p>
+          </div>
+
+          <!-- Ring Theme Gallery (6 Curated Industrial Palettes synced 1:1 with 3D + Wayland!) -->
+          <div class="glass-card">
+            <div class="card-head compact-head">
+              <div>
+                <div class="card-label">RING VISUAL THEME · 3D &amp; WAYLAND</div>
+                <div class="card-title">Overlay Appearance</div>
+              </div>
+              <span class="mono-readout sm" id="ring-theme-readout">Studio Copper</span>
+            </div>
+            <div class="ring-theme-grid" id="ring-theme-grid"></div>
+          </div>
+
+          <!-- Active Profile + Interactive Themed SVG Ring Designer -->
+          <div class="glass-card profile-bar">
+            <select id="sel-ring-profile" class="studio-select" aria-label="Ring profile"></select>
+            <button type="button" class="btn-primary sm" id="btn-add-profile">+ App</button>
+            <button type="button" class="btn-secondary sm" id="btn-del-profile">Delete</button>
+          </div>
+
+          <div class="glass-card ring-designer-card">
+            <svg id="ring-svg" class="ring-svg" viewBox="0 0 320 320" role="group" aria-label="8-slice Actions Ring selector"></svg>
+            <div class="slice-editor">
+              <div class="card-head compact-head">
+                <span class="card-title" id="slice-heading">Slice 1</span>
+                <button type="button" class="btn-secondary sm" id="btn-test-slice">Test Action</button>
+              </div>
+              <div class="inline-field">
+                <label for="slice-label" class="field-caption">LABEL</label>
+                <input type="text" id="slice-label" class="studio-input" placeholder="e.g. Copy" />
+              </div>
+              <div class="inline-field">
+                <label for="slice-type" class="field-caption">ACTION TYPE</label>
+                <select id="slice-type" class="studio-select">
+                  <option value="keystroke">Keystroke</option>
+                  <option value="command">Command</option>
+                  <option value="application">Application</option>
+                  <option value="dpi_cycle">Cycle DPI</option>
+                  <option value="smartshift_toggle">Toggle Scroll Mode</option>
+                  <option value="host_next">Next Easy-Switch Host</option>
+                  <option value="haptic">Play Haptic</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </div>
+              <div class="inline-field">
+                <label for="slice-data" class="field-caption">PAYLOAD</label>
+                <input type="text" id="slice-data" class="studio-input" placeholder="ctrl+c" />
+              </div>
+              <div class="chip-grid" id="ring-quick-chips"></div>
+            </div>
+          </div>
+
+          <!-- 1-Click Workflow Ring Presets Gallery -->
+          <div class="glass-card">
+            <div class="card-head compact-head">
+              <div>
+                <div class="card-label">WORKFLOW PRESETS · 1-CLICK APPLY</div>
+                <div class="card-title">Load Ring Preset into Profile</div>
+              </div>
+              <span class="card-sub mono" id="ring-preset-target">→ Default</span>
+            </div>
+            <div class="ring-preset-grid" id="ring-preset-grid"></div>
+          </div>
+
+          <!-- Ring Behavior, Geometry Scale, Motion & Live Wayland Preview -->
+          <div class="glass-card stack-switches">
+            <div class="card-head compact-head">
+              <div>
+                <div class="card-label">OVERLAY BEHAVIOR &amp; GEOMETRY</div>
+                <div class="card-title">Trigger, Scale &amp; Motion</div>
+              </div>
+              <button type="button" class="btn-primary sm" id="btn-preview-ring">Preview Live Ring</button>
+            </div>
+            <label class="switch-row">
+              <span><strong>Enable Actions Ring</strong><small>Hold trigger button &amp; flick to execute slices</small></span>
+              <input type="checkbox" id="sw-ring-enabled" class="studio-switch" />
+            </label>
+            <div class="select-row">
+              <span><strong>Trigger Button</strong><small>Physical control that opens the radial overlay</small></span>
+              <select id="sel-ring-trigger" class="studio-select">
+                <option value="416">Haptic Sense Thumb Pad (0x01A0)</option>
+                <option value="195">Side Gesture Button (0x00C3)</option>
+                <option value="196">Mode Shift (0x00C4)</option>
+                <option value="82">Wheel Click (0x0052)</option>
+                <option value="83">Back Button (0x0053)</option>
+              </select>
+            </div>
+            <div class="inline-field">
+              <span class="field-caption">RING SCALE</span>
+              <div class="mode-pills ring-size-pills" id="ring-size-pills">
+                <button type="button" class="mode-pill" data-ring-size="compact"><span>Compact</span><em class="mode-check">✓</em></button>
+                <button type="button" class="mode-pill is-active" data-ring-size="standard"><span>Standard</span><em class="mode-check">✓</em></button>
+                <button type="button" class="mode-pill" data-ring-size="large"><span>Large</span><em class="mode-check">✓</em></button>
+              </div>
+            </div>
+            <div class="card-head compact-head">
+              <span class="field-caption">CANCEL DEADZONE RADIUS</span>
+              <span class="mono-readout sm"><span id="dz-readout">40</span> px</span>
+            </div>
+            <input type="range" id="dz-slider" class="studio-slider" min="20" max="80" step="5" value="40" aria-label="Cancel deadzone radius" />
+            <div class="divider"></div>
+            <label class="switch-row">
+              <span><strong>Show Shortcut Hints</strong><small>Display keystroke / command subtitle inside each slice</small></span>
+              <input type="checkbox" id="sw-ring-hints" class="studio-switch" checked />
+            </label>
+            <label class="switch-row">
+              <span><strong>60 FPS Spring Motion</strong><small>Fluid bloom-in, slice lift, compass tracking &amp; confirm burst</small></span>
+              <input type="checkbox" id="sw-ring-animate" class="studio-switch" checked />
+            </label>
+          </div>
+        </div>
+
+        <!-- ─────────── TAB 5: BUTTONS ─────────── -->
+        <div class="tab-panel" id="panel-buttons" data-panel="buttons" hidden>
+          <div class="panel-header">
+            <h2 class="panel-title" tabindex="-1">Physical Controls</h2>
+            <p class="panel-desc">Click any hotspot on the 3D mouse or select a control below to configure global or per-app actions.</p>
+          </div>
+
+          <div class="glass-card profile-bar">
+            <select id="sel-button-scope" class="studio-select" aria-label="Button binding scope"></select>
+            <button type="button" class="btn-secondary sm" id="btn-reset-all-buttons">Reset All</button>
+          </div>
+
+          <div class="buttons-list" id="buttons-list"></div>
+        </div>
+
+        <!-- ─────────── TAB 6: LAB / DIAGNOSTICS ─────────── -->
+        <div class="tab-panel" id="panel-diagnostics" data-panel="diagnostics" hidden>
+          <div class="panel-header">
+            <h2 class="panel-title" tabindex="-1">Hardware Lab</h2>
+            <p class="panel-desc">X-Ray telemetry, service health diagnostics, and live 45-feature HID++ 2.0 probe.</p>
+          </div>
+
+          <div class="health-grid" id="health-grid"></div>
+
+          <div class="glass-card">
+            <div class="card-head">
+              <div>
+                <div class="card-label">LIVE TELEMETRY</div>
+                <div class="card-title">Hardware Snapshot</div>
+              </div>
+              <button type="button" class="btn-secondary sm" id="btn-copy-diag">Copy JSON</button>
+            </div>
+            <pre class="telemetry-pre" id="telemetry-pre">Reading live state…</pre>
+          </div>
+
+          <div class="section-eyebrow">HID++ 2.0 FEATURE EXPLORER</div>
+          <div class="glass-card">
+            <div class="input-action-row">
+              <button type="button" class="btn-primary sm" id="btn-probe-features">Probe 45 Features</button>
+              <input type="search" id="probe-filter" class="studio-input" placeholder="Filter by ID or name (19B0, HAPTIC, SMART)…" />
+            </div>
+            <div class="probe-list" id="probe-list">
+              <p class="card-sub">Click "Probe 45 Features" to interrogate every enumerated HID++ 2.0 feature on your MX Master 4.</p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </aside>
+
+    <!-- Toast Notification Stack -->
+    <div class="toast-stack" id="toast-stack" aria-live="polite" aria-atomic="true"></div>
+  </div>
+
+  <!-- ═══════════════ NATIVE MODAL DIALOGS ═══════════════ -->
+
+  <!-- Button Rebind Dialog -->
+  <dialog id="dlg-rebind" class="studio-dialog" closedby="any" aria-labelledby="dlg-rebind-title">
+    <div class="dialog-head">
+      <div>
+        <div class="card-label" id="dlg-rebind-cid">CID 0x0052</div>
+        <h3 id="dlg-rebind-title">Configure Control</h3>
+      </div>
+      <button type="button" class="icon-btn" data-close-dialog="dlg-rebind" aria-label="Close">✕</button>
+    </div>
+    <form method="dialog" id="form-rebind" class="dialog-body">
+      <div class="inline-field">
+        <label for="rebind-type" class="field-caption">ACTION MODE</label>
+        <select id="rebind-type" class="studio-select" autofocus>
+          <option value="default">Default (Factory Firmware)</option>
+          <option value="keystroke">Keystroke Shortcut</option>
+          <option value="key_hold">Hold Key (Push-to-Talk)</option>
+          <option value="command">Shell Command</option>
+          <option value="application">Launch Application</option>
+          <option value="dpi_cycle">Cycle DPI Presets</option>
+          <option value="dpi_set">Set Fixed DPI</option>
+          <option value="smartshift_toggle">Toggle Free-Spin / SmartShift</option>
+          <option value="host_next">Switch to Next Easy-Switch Host</option>
+          <option value="haptic">Play Haptic Waveform</option>
+          <option value="remap">Hardware Firmware Remap</option>
+          <option value="disabled">Disabled (Swallow Input)</option>
+        </select>
+      </div>
+
+      <div id="rebind-field-text" class="inline-field" hidden>
+        <label for="rebind-data" class="field-caption" id="rebind-data-label">PAYLOAD</label>
+        <div class="input-action-row">
+          <input type="text" id="rebind-data" class="studio-input" placeholder="ctrl+shift+t" />
+          <button type="button" class="btn-secondary sm" id="btn-record-keys" hidden>Record</button>
+        </div>
+        <div class="chip-grid" id="rebind-quick-keys" hidden></div>
+      </div>
+
+      <div id="rebind-field-remap" class="inline-field" hidden>
+        <label for="rebind-target" class="field-caption">TARGET PHYSICAL BUTTON</label>
+        <select id="rebind-target" class="studio-select">
+          <option value="80">Left Click</option>
+          <option value="81">Right Click</option>
+          <option value="82">Wheel Click</option>
+          <option value="83">Back</option>
+          <option value="86">Forward</option>
+          <option value="196">Mode Shift</option>
+          <option value="195">Gesture Button</option>
+        </select>
+      </div>
+
+      <div class="dialog-foot">
+        <button type="submit" value="cancel" class="btn-secondary">Cancel</button>
+        <button type="submit" value="apply" class="btn-primary">Apply to Mouse</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Generic Text Prompt Dialog (Rename Mouse / Rename Host / Add App Profile) -->
+  <dialog id="dlg-prompt" class="studio-dialog" closedby="any" aria-labelledby="dlg-prompt-title">
+    <div class="dialog-head">
+      <h3 id="dlg-prompt-title">Rename</h3>
+      <button type="button" class="icon-btn" data-close-dialog="dlg-prompt" aria-label="Close">✕</button>
+    </div>
+    <form method="dialog" id="form-prompt" class="dialog-body">
+      <p class="card-sub" id="dlg-prompt-desc"></p>
+      <div class="inline-field">
+        <label for="prompt-input" class="field-caption" id="prompt-label">VALUE</label>
+        <input type="text" id="prompt-input" class="studio-input" autofocus />
+      </div>
+      <div class="inline-field" id="prompt-template-wrap" hidden>
+        <label for="prompt-template" class="field-caption">STARTING TEMPLATE</label>
+        <select id="prompt-template" class="studio-select">
+          <option value="default">Productivity Essentials (Default)</option>
+          <option value="hyprland">Hyprland Window Manager</option>
+          <option value="browser">Web Browser</option>
+          <option value="editor">Code / IDE</option>
+          <option value="terminal">Terminal / Shell</option>
+          <option value="media">Media &amp; PipeWire Audio</option>
+          <option value="creative">Creative &amp; 3D Studio</option>
+          <option value="hardware">MX4 Hardware Deck</option>
+        </select>
+      </div>
+      <div class="dialog-foot">
+        <button type="submit" value="cancel" class="btn-secondary">Cancel</button>
+        <button type="submit" value="save" class="btn-primary" id="prompt-confirm-btn">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

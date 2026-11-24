@@ -1,81 +1,90 @@
 #!/bin/bash
-# Install mx4control — daemon + CLI + settings GUI
+# Install MX4Control 1.0 — system daemon + user agent + CLI + GTK4 settings GUI.
 #
-# Run with sudo for system-wide installation including udev rules,
-# without sudo for per-user installation under ~/.local.
-
+# Run with sudo:
+#     sudo ./install.sh
+#     sudo systemctl enable --now mx4-sysd.service
+#     systemctl --user enable --now mx4-agent.service
+#
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-if [[ $EUID -eq 0 ]]; then
-    PREFIX="/usr/local"
-    SYSTEM_INSTALL=1
-    echo "=== Installing system-wide to $PREFIX ==="
-else
-    PREFIX="$HOME/.local"
-    SYSTEM_INSTALL=0
-    echo "=== Installing per-user to $PREFIX ==="
-    echo "Run with sudo for udev rules; user install won't grant hidraw/evdev access."
+if [[ $EUID -ne 0 ]]; then
+    echo "This installs a system service + D-Bus policy + udev rules — run with sudo." >&2
+    exit 1
 fi
 
-install_dir="$PREFIX/share/mx4control"
-bin_dir="$PREFIX/bin"
-desktop_dir="$PREFIX/share/applications"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+install_dir="/usr/lib/mx4control"
+share_dir="/usr/share/mx4control"
+LAYER_SHELL="${LAYER_SHELL:-/usr/lib/libgtk4-layer-shell.so}"
 
-mkdir -p "$install_dir" "$bin_dir" "$desktop_dir"
-
-# Install the Python package
-rm -rf "$install_dir/src"
+echo "=== Installing MX4Control 1.0 to $install_dir ==="
+rm -rf "$install_dir/src" "$share_dir/studio"
+install -d "$install_dir" "$share_dir/css" "$share_dir/studio"
 cp -r "$SCRIPT_DIR/src" "$install_dir/"
-
-# Compile .pyc so runtime startup is fast
+install -Dm644 "$SCRIPT_DIR/data/css/style.css" "$share_dir/css/style.css"
+cp -r "$SCRIPT_DIR/data/studio/." "$share_dir/studio/"
 /usr/bin/python3 -m compileall -q "$install_dir/src" || true
 
-# Three launchers: daemon, CLI, settings GUI
-for entry in mx4d:mx4.daemon.main mx4ctl:mx4.cli.main mx4-settings:mx4.ui.app; do
-    name="${entry%%:*}"
-    module="${entry##*:}"
-    cat > "$bin_dir/$name" <<LAUNCH
-#!/bin/bash
-export PYTHONPATH="$install_dir/src\${PYTHONPATH:+:\$PYTHONPATH}"
-exec env LD_PRELOAD="\${LD_PRELOAD:-/usr/lib/libgtk4-layer-shell.so}" \\
-    /usr/bin/python3 -m $module "\$@"
-LAUNCH
-    chmod +x "$bin_dir/$name"
-done
+# ── console scripts ───────────────────────────────────────────────────────
+emit_launcher() {  # name module [preload]
+    local name="$1" module="$2" preload="${3:-}"
+    {
+        echo '#!/bin/bash'
+        echo "export PYTHONPATH=\"$install_dir/src\${PYTHONPATH:+:\$PYTHONPATH}\""
+        if [[ -n "$preload" ]]; then
+            echo "export LD_PRELOAD=\"\${LD_PRELOAD:-$LAYER_SHELL}\""
+        fi
+        echo "exec /usr/bin/python3 -m $module \"\$@\""
+    } > "/usr/bin/$name"
+    chmod +x "/usr/bin/$name"
+}
+emit_launcher mx4-sysd     mx4.sysd
+emit_launcher mx4ctl       mx4.cli.main
+emit_launcher mx4-settings mx4.ui.app
+emit_launcher mx4-agent    mx4.agent preload
 
-# Desktop entry
-install -Dm644 "$SCRIPT_DIR/data/io.github.mx4control.desktop" "$desktop_dir/"
+# ── system units / policy / rules ──────────────────────────────────────────
+install -Dm644 "$SCRIPT_DIR/systemd/mx4-sysd.service"  /etc/systemd/system/mx4-sysd.service
+install -Dm644 "$SCRIPT_DIR/systemd/mx4-agent.service" /usr/lib/systemd/user/mx4-agent.service
+install -Dm644 "$SCRIPT_DIR/data/dbus/org.mx4control.System.conf" \
+    /usr/share/dbus-1/system.d/org.mx4control.System.conf
+install -Dm644 "$SCRIPT_DIR/systemd/42-mx4control.rules" \
+    /etc/udev/rules.d/42-mx4control.rules
+install -Dm644 "$SCRIPT_DIR/data/io.github.mx4control.desktop" \
+    /usr/share/applications/io.github.mx4control.desktop
 
-# systemd user unit
-if [[ $SYSTEM_INSTALL -eq 1 ]]; then
-    install -Dm644 "$SCRIPT_DIR/systemd/mx4d.service" \
-        /etc/systemd/user/mx4d.service
-    echo "Installed systemd user unit → enable per-user with:"
-    echo "  systemctl --user daemon-reload"
-    echo "  systemctl --user enable --now mx4d.service"
+# ── reload subsystems ──────────────────────────────────────────────────────
+systemctl daemon-reload
+udevadm control --reload-rules && udevadm trigger
+systemctl reload dbus 2>/dev/null || systemctl reload dbus-broker 2>/dev/null || true
 
-    install -Dm644 "$SCRIPT_DIR/systemd/42-mx4control.rules" \
-        /etc/udev/rules.d/42-mx4control.rules
-    udevadm control --reload-rules
-    udevadm trigger
-    echo "udev rules installed and reloaded."
-else
-    user_unit_dir="$HOME/.config/systemd/user"
-    mkdir -p "$user_unit_dir"
-    # Swap the system path for the user-local bin in the unit
-    sed "s|/usr/local/bin/mx4d|$bin_dir/mx4d|" \
-        "$SCRIPT_DIR/systemd/mx4d.service" \
-        > "$user_unit_dir/mx4d.service"
-    echo "Installed user systemd unit → enable with:"
-    echo "  systemctl --user daemon-reload"
-    echo "  systemctl --user enable --now mx4d.service"
-    echo
-    echo "⚠  For hidraw/evdev access run once with sudo:"
-    echo "  sudo install -m644 $SCRIPT_DIR/systemd/42-mx4control.rules /etc/udev/rules.d/"
-    echo "  sudo udevadm control --reload-rules && sudo udevadm trigger"
+if systemctl is-active --quiet mx4-sysd.service; then
+    echo "Restarting mx4-sysd.service..."
+    systemctl restart mx4-sysd.service
 fi
 
-echo
-echo "Done. Test with: mx4ctl ping"
+# Automatically restart the invoking desktop user's mx4-agent.service if active!
+if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
+    user_uid="$(id -u "$SUDO_USER" 2>/dev/null || true)"
+    if [[ -n "$user_uid" && -S "/run/user/$user_uid/bus" ]]; then
+        echo "Reloading & restarting mx4-agent.service for $SUDO_USER..."
+        sudo -u "$SUDO_USER" \
+            XDG_RUNTIME_DIR="/run/user/$user_uid" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$user_uid/bus" \
+            systemctl --user daemon-reload || true
+        sudo -u "$SUDO_USER" \
+            XDG_RUNTIME_DIR="/run/user/$user_uid" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$user_uid/bus" \
+            systemctl --user restart mx4-agent.service || true
+    fi
+fi
+
+cat <<'DONE'
+
+Installed MX4Control 1.0 cleanly (mx4-sysd + mx4-agent restarted).
+Verify:
+  mx4ctl ping
+  mx4ctl state
+  mx4-settings
+DONE

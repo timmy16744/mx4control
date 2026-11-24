@@ -1,21 +1,48 @@
 """HID++ 2.0 protocol layer for the MX Master 4."""
 
-from .features import FeatureID, ControlID, HapticPattern, TaskID, HIDPPError
+from .features import (
+    BusType,
+    ControlID,
+    FeatureID,
+    HIDPPError,
+    HapticPattern,
+    HiresFlag,
+    TaskID,
+    WheelMode,
+)
 from .dispatcher import HIDPPDispatcher, MessageType
-from .device import MXMaster4, DeviceInfo
+from .device import (
+    ButtonInfo,
+    DeviceInfo,
+    ForceButtonInfo,
+    HapticCapabilities,
+    HostInfo,
+    HostsSummary,
+    MXMaster4,
+    SmartShiftState,
+)
 from .discovery import find_mx_master_4, LOGITECH_VID, MX_MASTER_4_PIDS
 
 __all__ = [
-    "FeatureID",
+    "BusType",
+    "ButtonInfo",
     "ControlID",
-    "HapticPattern",
-    "TaskID",
-    "HIDPPError",
-    "HIDPPDispatcher",
-    "MessageType",
-    "MXMaster4",
     "DeviceInfo",
-    "find_mx_master_4",
+    "FeatureID",
+    "ForceButtonInfo",
+    "HIDPPDispatcher",
+    "HIDPPError",
+    "HapticCapabilities",
+    "HapticPattern",
+    "HiresFlag",
+    "HostInfo",
+    "HostsSummary",
     "LOGITECH_VID",
+    "MXMaster4",
     "MX_MASTER_4_PIDS",
+    "MessageType",
+    "SmartShiftState",
+    "TaskID",
+    "WheelMode",
+    "find_mx_master_4",
 ]

@@ -39,3 +39,9 @@ Thumbs.db
 
 # Config (user-specific)
 *.log
+
+# Showcase video build caches & rendered outputs (too large for Git; host via GitHub Releases)
+showcase-video/node_modules/
+showcase-video/tmp/
+showcase-video/out/
+beta/

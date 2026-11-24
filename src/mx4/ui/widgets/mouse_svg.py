@@ -38,8 +38,6 @@ _WHEEL_BG      = (0.071, 0.071, 0.078)  # #121214
 _WHEEL_RIDGE   = (0.200, 0.200, 0.200)  # #333333
 _THUMB_BG      = (0.176, 0.176, 0.196)  # #2d2d32
 _THUMB_DOT     = (0.102, 0.102, 0.118)  # #1a1a1e
-_TEXT_PRIMARY  = (1.0, 1.0, 1.0)
-_TEXT_DIM      = (0.60, 0.60, 0.60)
 _GLYPH_BLUE    = (0.529, 0.808, 0.922)  # #87CEEB
 _PINK_GLOW     = (1.0, 0.412, 0.706)    # #FF69B4
 _ACCENT_COPPER = (0.83, 0.65, 0.46)     # copper — shared with the rest of the app
@@ -86,13 +84,11 @@ class MouseSVG(Gtk.DrawingArea):
         self._pressed: set[int] = set()
         self._remapped: set[int] = set()
         self._hover: Optional[int] = None
-        self._show_label = show_label
-        self._label_name = "MX Master 4"
-        self._label_sub = "Connected via Bolt"
-        self._connected = True
 
-        # When the label is hidden the widget only needs ~2/3 of the
-        # reference viewBox's height (the label footer is at y≈510).
+        # The widget reserves footer space (and a taller viewBox) only when
+        # the caller opts into the name/status label. No caller does today,
+        # but the parameter keeps the geometry correct if one ever does.
+        self._show_label = show_label
         if show_label:
             effective_h = _VIEWBOX_H
         else:
@@ -132,20 +128,6 @@ class MouseSVG(Gtk.DrawingArea):
     def set_remapped_cids(self, cids: set[int]) -> None:
         if cids != self._remapped:
             self._remapped = set(cids)
-            self.queue_draw()
-
-    def set_label(self, name: str, sub: str = "", connected: bool = True) -> None:
-        self._label_name = name
-        self._label_sub = sub
-        self._connected = connected
-        self.queue_draw()
-
-    def set_show_label(self, show: bool) -> None:
-        if show != self._show_label:
-            self._show_label = show
-            # Recompute preferred height based on whether we reserve
-            # footer space for the label rows.
-            self.queue_resize()
             self.queue_draw()
 
     # ─── animation ──────────────────────────────────────────────────
@@ -221,8 +203,6 @@ class MouseSVG(Gtk.DrawingArea):
         self._draw_side_buttons(cr)
         self._draw_thumb_wheel(cr)
         self._draw_thumb_pad(cr)
-        if self._show_label:
-            self._draw_label(cr)
         # Pressed / hover overlays drawn last so they sit above everything
         self._draw_overlays(cr)
 
@@ -400,36 +380,6 @@ class MouseSVG(Gtk.DrawingArea):
                 cr.new_sub_path()
                 cr.arc(col_x, row_y, 2.2, 0, 2 * math.pi)
         cr.fill()
-
-    def _draw_label(self, cr) -> None:
-        # Title
-        cr.set_source_rgb(*_TEXT_PRIMARY)
-        cr.select_font_face("Inter", cairo.FONT_SLANT_NORMAL,
-                             cairo.FONT_WEIGHT_BOLD)
-        cr.set_font_size(20)
-        ext = cr.text_extents(self._label_name)
-        cr.move_to(_VIEWBOX_W / 2 - ext.width / 2, 515)
-        cr.show_text(self._label_name)
-
-        # Status dot + subtitle
-        if self._label_sub:
-            dot_color = _GLYPH_BLUE if self._connected else _TEXT_DIM
-            # Outer soft glow
-            if self._connected:
-                for r, a in ((9, 0.15), (6, 0.25)):
-                    cr.set_source_rgba(*dot_color, a)
-                    cr.arc(122, 541, r, 0, 2 * math.pi)
-                    cr.fill()
-            cr.set_source_rgb(*dot_color)
-            cr.arc(122, 541, 5, 0, 2 * math.pi)
-            cr.fill()
-
-            cr.set_source_rgb(*_TEXT_DIM)
-            cr.select_font_face("Inter", cairo.FONT_SLANT_NORMAL,
-                                 cairo.FONT_WEIGHT_NORMAL)
-            cr.set_font_size(14)
-            cr.move_to(138, 545)
-            cr.show_text(self._label_sub)
 
     def _draw_overlays(self, cr) -> None:
         """Draw hover / pressed / remapped accents on top of everything."""

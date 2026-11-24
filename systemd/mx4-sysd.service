@@ -1,0 +1,31 @@
+[Unit]
+Description=mx4control system device daemon (Logitech MX Master 4)
+Documentation=https://github.com/timmy16744/mx4control
+After=dbus.service
+Wants=systemd-udevd.service
+
+[Service]
+Type=dbus
+BusName=org.mx4control.System
+ExecStart=/usr/bin/mx4-sysd
+Restart=on-failure
+RestartSec=3
+
+# systemd creates and owns these for us
+ConfigurationDirectory=mx4control
+RuntimeDirectory=mx4control
+LogsDirectory=mx4control
+
+# Hardening — no GUI/Wayland/evdev here, only hidraw + udev + D-Bus
+NoNewPrivileges=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/etc/mx4control /run/mx4control /var/log/mx4control
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

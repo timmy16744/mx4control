@@ -7,7 +7,7 @@ and a dim subtitle. Selection highlights with the copper accent.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Callable
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -64,9 +64,3 @@ class SidebarNav(Gtk.ListBox):
     def _on_row_selected(self, _box, row):
         if row is not None and self._on_selected:
             self._on_selected(row.page_id)
-
-    def select(self, page_id: str) -> None:
-        for r in self._rows:
-            if r.page_id == page_id:
-                self.select_row(r)
-                return

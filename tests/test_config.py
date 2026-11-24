@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-import pytest
 
 from mx4.config import ConfigStore
 from mx4.config.schema import CONFIG_VERSION

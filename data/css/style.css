@@ -560,3 +560,37 @@ toast {
     border-radius: 10px;
     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
 }
+
+/* ─────────────────────────────────────────────────────────────────────
+   Badges, active host cards & monospace diagnostics (1.0)
+   ───────────────────────────────────────────────────────────────────── */
+
+.mx4-badge {
+    background: @mx_bg_elevated;
+    color: @mx_text_secondary;
+    border: 1px solid @mx_border;
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10.5px;
+    font-weight: 600;
+}
+
+.mx4-host-active {
+    border-color: @mx_border_hover;
+    background: linear-gradient(180deg,
+        rgba(212, 165, 116, 0.12) 0%,
+        @mx_bg_card 100%);
+}
+
+.mx4-host-active-label {
+    color: @mx_success;
+    font-size: 11.5px;
+    font-weight: 600;
+}
+
+.mx4-mono {
+    font-family: "JetBrains Mono", "IBM Plex Mono", monospace;
+    font-size: 11.5px;
+    color: @mx_text_secondary;
+}

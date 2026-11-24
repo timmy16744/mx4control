@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from mx4.daemon.gesture import _segment_for, SEGMENT_COUNT
+from mx4.agent.gesture import _segment_for, SEGMENT_COUNT
 
 
 @pytest.mark.parametrize("dx,dy,expected", [

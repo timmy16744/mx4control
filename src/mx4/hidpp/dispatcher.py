@@ -19,11 +19,10 @@ from __future__ import annotations
 import os
 import logging
 import select
-import struct
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Optional, Protocol
+from typing import Callable, Optional
 
 from .features import MessageType, HIDPPError, FeatureID
 
@@ -139,16 +138,22 @@ class HIDPPDispatcher:
         return True
 
     def close(self) -> None:
+        # Order matters: stop the reader and JOIN it *before* closing the fd.
+        # Closing first left a window where the reader could read() a closed
+        # (or worse, recycled) fd. The reader polls _running every 0.2s via
+        # select() timeout, so the join returns promptly.
         self._running = False
+        reader = self._reader_thread
+        if reader and reader.is_alive() and reader is not threading.current_thread():
+            reader.join(timeout=1.0)
+        self._reader_thread = None
+
         if self._fd is not None:
             try:
                 os.close(self._fd)
             except OSError:
                 pass
             self._fd = None
-        if self._reader_thread and self._reader_thread.is_alive():
-            self._reader_thread.join(timeout=1.0)
-        self._reader_thread = None
 
         # Wake any pending waiters so they don't block forever
         with self._state_lock:
@@ -321,13 +326,14 @@ class HIDPPDispatcher:
     def _reader_loop(self) -> None:
         """Single reader: routes each message to a waiter or subscribers."""
         while self._running:
-            if self._fd is None:
+            fd = self._fd
+            if fd is None:
                 break
             try:
-                r, _, _ = select.select([self._fd], [], [], 0.2)
+                r, _, _ = select.select([fd], [], [], 0.2)
                 if not r:
                     continue
-                data = os.read(self._fd, REPORT_LONG)
+                data = os.read(fd, REPORT_LONG)
                 if not data or len(data) < 4:
                     continue
 
@@ -344,12 +350,14 @@ class HIDPPDispatcher:
                 if device_idx != self._device_index:
                     continue
 
-                # Error response: feature_idx == 0xFF. Layout:
-                # [report, dev, 0xFF, feat_that_errored, fn_sw_id, code]
+                # Error response: feature_idx == 0xFF. Wire layout:
+                # [report_id, dev_idx, 0xFF, errored_feat_idx, fn_sw_id, error_code, ...]
+                # Note: data[3] (parsed above as function_sw) is errored_feature,
+                # and payload = data[4:] begins with [errored_fn_sw, error_code].
                 if feature_idx == 0xFF and len(payload) >= 2:
-                    errored_feature = payload[0]
-                    errored_fn_sw = payload[1]
-                    error_code = payload[2] if len(payload) > 2 else 0x01
+                    errored_feature = data[3]
+                    errored_fn_sw = payload[0]
+                    error_code = payload[1]
                     errored_sw = errored_fn_sw & 0x0F
                     errored_fn = (errored_fn_sw >> 4) & 0x0F
 

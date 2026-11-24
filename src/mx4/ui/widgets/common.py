@@ -76,10 +76,10 @@ def stat_card(label_text: str, value: str, unit: str = "",
         img.set_pixel_size(14)
         img.set_opacity(0.65)
         top.append(img)
-    l = Gtk.Label(label=label_text.upper(), xalign=0)
-    l.add_css_class("mx4-card-unit")
-    l.set_hexpand(True)
-    top.append(l)
+    lbl = Gtk.Label(label=label_text.upper(), xalign=0)
+    lbl.add_css_class("mx4-card-unit")
+    lbl.set_hexpand(True)
+    top.append(lbl)
     c.append(top)
 
     val_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6,
@@ -87,6 +87,7 @@ def stat_card(label_text: str, value: str, unit: str = "",
     val_label = Gtk.Label(label=value, xalign=0)
     val_label.add_css_class("mx4-card-value")
     val_row.append(val_label)
+    u = None
     if unit:
         u = Gtk.Label(label=unit, xalign=0, valign=Gtk.Align.END)
         u.add_css_class("mx4-card-unit")
@@ -95,4 +96,6 @@ def stat_card(label_text: str, value: str, unit: str = "",
     c.append(val_row)
 
     c.value_label = val_label  # type: ignore[attr-defined]
+    if u is not None:
+        c.unit_label = u       # type: ignore[attr-defined]
     return c

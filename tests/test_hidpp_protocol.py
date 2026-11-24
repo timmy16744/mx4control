@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from mx4.hidpp.features import (
-    FeatureID, ControlID, HapticPattern, HIDPPError,
-    MessageType, MappingFlag, KeyFlag,
+    FeatureID, HapticPattern, HIDPPError,
+    MappingFlag,
 )
 
 

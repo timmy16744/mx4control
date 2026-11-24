@@ -1,0 +1,18 @@
+{
+  "name": "mx4-studio-showcase-video",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Programmatic 4K 60fps launch video studio for MX4 Studio (Logitech MX Master 4)",
+  "scripts": {
+    "cairo-ring": "python3 cairo_ring_frames.py",
+    "audio": "python3 audio/synth_master.py",
+    "contacts": "node render.mjs --contacts",
+    "render:4k": "node render.mjs --mode=landscape",
+    "render:vertical": "node render.mjs --mode=vertical",
+    "render:all": "npm run cairo-ring && npm run audio && npm run render:4k && npm run render:vertical"
+  },
+  "dependencies": {
+    "playwright-core": "^1.50.0"
+  }
+}

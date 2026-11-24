@@ -1,0 +1,19 @@
+[Unit]
+Description=mx4control session agent (Actions Ring, gestures, per-app profiles)
+Documentation=https://github.com/timmy16744/mx4control
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=dbus
+BusName=org.mx4control.Agent
+ExecStart=/usr/bin/mx4-agent
+Restart=on-failure
+RestartSec=3
+# The Actions Ring overlay is the ONLY component that needs layer-shell;
+# confine the preload to this process (the GUI/CLI must not inherit it).
+Environment=GDK_BACKEND=wayland
+Environment=LD_PRELOAD=/usr/lib/libgtk4-layer-shell.so
+
+[Install]
+WantedBy=graphical-session.target

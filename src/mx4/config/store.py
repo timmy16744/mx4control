@@ -9,10 +9,12 @@ from dataclasses import asdict, fields, is_dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+import tomlkit
+
 from .schema import (
     Config, HapticSettings, PointerSettings, ScrollSettings,
     ThumbWheelSettings, DaemonSettings, RingProfile, ActionSlice,
-    ButtonBinding, CONFIG_VERSION, _default_ring,
+    ButtonBinding,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,7 +62,26 @@ class ConfigStore:
                 data = migration(data)
                 data_version = migration.to_version
 
-        return _from_dict(Config, data)
+        cfg = _from_dict(Config, data)
+        # Auto-heal legacy MX4 CID bug: 0x00D7 (215) is Virtual Gesture Button;
+        # physical Haptic Sense Thumb Pad is 0x01A0 (416).
+        migrated = False
+        if cfg.daemon.trigger_cid == 0x00D7:
+            cfg.daemon.trigger_cid = 0x01A0
+            migrated = True
+        if (
+            cfg.thumbwheel.preset == "volume"
+            and cfg.thumbwheel.positive_data == "XF86AudioRaiseVolume"
+        ):
+            cfg.thumbwheel.positive_type = "command"
+            cfg.thumbwheel.positive_data = "wpctl set-volume -l 1.5 @DEFAULT_AUDIO_SINK@ 5%+"
+            cfg.thumbwheel.negative_type = "command"
+            cfg.thumbwheel.negative_data = "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
+            migrated = True
+        if migrated:
+            self._config = cfg
+            self.save()
+        return cfg
 
     def save(self) -> bool:
         if self._config is None:
@@ -68,13 +89,19 @@ class ConfigStore:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-            with tmp.open("w") as f:
-                _write_toml(f, asdict(self._config))
+            # tomlkit serialises the dataclass tree (no None fields in the
+            # schema, so this is total) — robust, vs the old hand-rolled
+            # writer that emitted invalid TOML for unexpected value types.
+            tmp.write_text(tomlkit.dumps(asdict(self._config)))
             os.replace(tmp, self.path)
             return True
         except Exception as e:
             logger.error(f"config save failed: {e}")
             return False
+
+    def invalidate(self) -> None:
+        """Drop the cached Config so the next access reloads from disk."""
+        self._config = None
 
     def update(self, **kwargs) -> None:
         cfg = self.config
@@ -150,6 +177,8 @@ def _from_dict(cls, data: dict) -> Any:
         # Handle nested dataclasses
         if f.type == list[ActionSlice] or f.name == "slices":
             kwargs[f.name] = [_from_dict(ActionSlice, s) for s in val]
+        elif f.name == "button_overrides":
+            kwargs[f.name] = [_from_dict(ButtonBinding, b) for b in val]
         elif f.name == "ring_profiles":
             kwargs[f.name] = {
                 k: _from_dict(RingProfile, v) for k, v in val.items()
@@ -171,64 +200,3 @@ def _from_dict(cls, data: dict) -> Any:
     return cls(**kwargs)
 
 
-def _write_toml(f, data: dict) -> None:
-    """Simple TOML writer — we control the schema so we don't need a
-    round-trip library. Emits the version header first, then tables in
-    a stable order, then ``[ring_profiles.*]`` sections last.
-    """
-    f.write("# mx4control configuration\n")
-    f.write("# Edited? Run `mx4ctl reload` to pick up changes without restart.\n\n")
-    f.write(f"version = {data.get('version', CONFIG_VERSION)}\n\n")
-
-    table_order = ["haptics", "pointer", "scroll", "thumbwheel", "daemon"]
-    for table in table_order:
-        section = data.get(table, {})
-        if not section:
-            continue
-        f.write(f"[{table}]\n")
-        for k, v in section.items():
-            f.write(f"{k} = {_toml_value(v)}\n")
-        f.write("\n")
-
-    # Ring profiles — one [ring_profiles.default] + nested slices arrays
-    for app_id, profile in (data.get("ring_profiles") or {}).items():
-        f.write(f"[ring_profiles.{_toml_key(app_id)}]\n")
-        for k, v in profile.items():
-            if k == "slices":
-                continue
-            f.write(f"{k} = {_toml_value(v)}\n")
-        f.write("\n")
-        for i, s in enumerate(profile.get("slices", [])):
-            f.write(f"[[ring_profiles.{_toml_key(app_id)}.slices]]\n")
-            for k, v in s.items():
-                f.write(f"{k} = {_toml_value(v)}\n")
-            f.write("\n")
-
-    # Button bindings
-    for b in (data.get("button_bindings") or []):
-        f.write("[[button_bindings]]\n")
-        for k, v in b.items():
-            f.write(f"{k} = {_toml_value(v)}\n")
-        f.write("\n")
-
-
-def _toml_key(k: str) -> str:
-    # Bare keys allow [A-Za-z0-9_-]+
-    if all(c.isalnum() or c in "_-" for c in k):
-        return k
-    return f'"{k}"'
-
-
-def _toml_value(v: Any) -> str:
-    if isinstance(v, bool):
-        return "true" if v else "false"
-    if isinstance(v, int):
-        return str(v)
-    if isinstance(v, float):
-        return repr(v)
-    if isinstance(v, str):
-        esc = v.replace("\\", "\\\\").replace('"', '\\"')
-        return f'"{esc}"'
-    if isinstance(v, list):
-        return "[" + ", ".join(_toml_value(i) for i in v) + "]"
-    return repr(v)
